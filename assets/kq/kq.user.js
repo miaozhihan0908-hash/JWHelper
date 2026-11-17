@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         山体智慧考勤
 // @namespace    kq.sdpei
-// @version      1.4.2
+// @version      1.4.3
 // @description  自动签到/签退 · 精简版（小到不会被剪贴板截断）
 // @match        *://qdxt.sdpei.edu.cn/*
 // @include      *://qdxt.sdpei.edu.cn:7083/*
@@ -46,6 +46,13 @@ async function mod() {
 /* 注入环境（如 App 的 WebView）里页面未必已经加载完 request 模块，这里重试等它 */
 async function waitMod(n) { let e; for (let i = 0; i < n; i++) { try { return await mod(); } catch (x) { e = x; if (i < n - 1) await SL(1000); } } throw e; }
 async function token0() { try { const M = await mod(); return (M.k && typeof M.k.get === 'function' ? M.k.get('JwtToken', true, 'STR') : '') || ''; } catch (e) { return ''; } }
+/* App 里走的是「智慧山体」统一认证：JwtToken 可能永远不出现，
+   但 userToken cookie 在、或者页面已经进到 /pages/kq/，就说明有登录态 */
+function hasSso() {
+  try { if (document.cookie && String(document.cookie).indexOf('userToken=') >= 0) return true; } catch (e) {}
+  try { return String(location.pathname || '').indexOf('/pages/kq/') >= 0; } catch (e) { return false; }
+}
+async function authOK() { if (await token0()) return true; return hasSso(); }
 const q = async (url, method, params) => { const M = await mod(); return M.c({ url, method, params: Object.assign({}, params, { uniContentType: 'json' }) }); };
 const api = {
   myInfo: () => q('/myinfoApp', 'POST', {}),
@@ -61,7 +68,7 @@ async function studentNo() {
   if (STU) return STU;
   STU = scan();
   if (STU) return STU;
-  if (!(await token0())) throw new Error('未登录，先在本页登录');
+  if (!(await authOK())) throw new Error('未登录，先在本页登录');
   try { const i = await api.myInfo(); const m = JSON.stringify(i).match(/"staffCode"\s*:\s*"([^"]+)"/); if (m) STU = m[1]; } catch (e) {}
   if (!STU) STU = scan();
   if (!STU) throw new Error('拿不到学号');
@@ -142,7 +149,7 @@ async function sign(force) {
   busy = true;
   try {
     const cm = force || cfg.commit;
-    if (!(await token0())) { say('未登录，先登录再点签到', 'err'); return 0; }
+    if (!(await authOK())) { say('未登录，先登录再点签到', 'err'); return 0; }
     const no = await studentNo();
     const r0 = await sched();
     const cs = (r0 && r0.data) || [];
@@ -180,7 +187,7 @@ async function sign(force) {
 }
 async function signout() {
   if (busy) return;
-  if (!(await token0())) { say('未登录，先登录再点签退', 'err'); return; }
+  if (!(await authOK())) { say('未登录，先登录再点签退', 'err'); return; }
   busy = true;
   try {
     const no = await studentNo();
@@ -225,6 +232,15 @@ function start() {
   UI.refresh();
 }
 function stop() { if (tm) { clearInterval(tm); tm = null; say('常驻已停止'); } if (lk) { try { lk.release(); } catch (e) {} lk = null; } UI.refresh(); }
+/* 手动探测：把真实返回码打在日志里，用来判断 cookie 够不够、接口通不通 */
+async function probe() {
+  try {
+    if (!(await authOK())) { say('没有登录态：cookie 无 userToken', 'err'); return; }
+    say('探测中…');
+    const r = await api.schedule(Y(new Date()), await studentNo());
+    say('探测 code=' + (r && r.code) + ' ' + String(JSON.stringify(r)).slice(0, 80));
+  } catch (e) { say('探测失败 ' + (e && e.message || e), 'err'); }
+}
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && tm && !lk) awake(); });
 (function panel() {
   const host = document.createElement('div');
@@ -236,6 +252,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   const st = E('div', 'color:rgb(156,163,175);margin-bottom:6px', '初始化…');
   const r1 = E('div', 'display:flex;gap:6px;margin:6px 0');
   const r2 = E('div', 'display:flex;gap:6px;margin:6px 0');
+  const r3 = E('div', 'display:flex;gap:6px;margin:6px 0');
   const log = E('div', 'max-height:92px;overflow:auto;background:rgb(11,18,32);border-radius:8px;padding:6px;font:10px/1.5 monospace;color:rgb(156,163,175);white-space:pre-wrap');
   const btn = (l, f, ex) => { const b = E('button', B + (ex || ''), l); b.addEventListener('click', f); return b; };
   const b1 = btn('签到', () => sign());
@@ -243,7 +260,10 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   const b3 = btn('', () => { cfg.commit = !cfg.commit; save(); say(cfg.commit ? '已开启提交，会真签' : '已切回演练'); }, ';background:rgb(124,45,18)');
   const b4 = btn('', () => (tm ? stop() : start()));
   r1.appendChild(b1); r1.appendChild(b2); r2.appendChild(b3); r2.appendChild(b4);
-  box.appendChild(st); box.appendChild(r1); box.appendChild(r2); box.appendChild(log);
+  const b5 = btn('探测', () => probe(), ';background:rgb(30,58,138)');
+  const b6 = btn('重载', () => location.reload());
+  r3.appendChild(b5); r3.appendChild(b6);
+  box.appendChild(st); box.appendChild(r1); box.appendChild(r2); box.appendChild(r3); box.appendChild(log);
   ball.addEventListener('click', () => { box.style.display = box.style.display === 'none' ? 'block' : 'none'; });
   host.appendChild(box); host.appendChild(ball);
   (document.body || document.documentElement).appendChild(host);
@@ -261,8 +281,8 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   try {
     await waitMod(40);
     UI.refresh();
-    if (!(await token0())) {
-      say('未登录：登录完成后自动开始');
+    if (!(await authOK())) {
+      say('等待登录态：cookie 无 userToken，登录后自动开始');
       const iv = setInterval(async () => { if (await token0()) { clearInterval(iv); say('检测到登录，开始工作'); STU = await studentNo().catch(() => null); UI.refresh(); if (cfg.autoStart) start(); } }, 2000);
       setTimeout(() => clearInterval(iv), 600000);
       return;
