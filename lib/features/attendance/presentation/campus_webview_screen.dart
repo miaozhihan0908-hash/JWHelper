@@ -7,6 +7,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:JWHelper/features/attendance/presentation/attendance_account_form.dart';
 import 'package:JWHelper/features/attendance/presentation/attendance_provider.dart';
 import 'package:JWHelper/features/attendance/presentation/attendance_web_actions.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 /// 智慧考勤网页版（底部导航「考勤」tab 主体）。
 ///
@@ -61,6 +62,7 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
             },
             onPageFinished: (String url) async {
               await _injectTokenToWebStorage();
+              await _injectCheckinScript();
               if (mounted) setState(() => _isLoading = false);
             },
           ),
@@ -318,6 +320,17 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
       );
     } catch (_) {
       // 非 H5 页面上执行脚本会失败，忽略即可。
+    }
+  }
+
+  /// 把签到辅助脚本注入考勤网页。脚本自带令牌等待（2 秒轮询）与悬浮面板，
+  /// 所以注入时机不必精确：页面还没就绪时它自己会续上。
+  Future<void> _injectCheckinScript() async {
+    try {
+      final js = await rootBundle.loadString('assets/kq/kq.user.js');
+      await _controller?.runJavaScript(js);
+    } catch (_) {
+      // 资源缺失或当前页面不支持脚本时静默跳过，不影响网页本身。
     }
   }
 
