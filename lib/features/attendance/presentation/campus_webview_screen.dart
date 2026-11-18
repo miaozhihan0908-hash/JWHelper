@@ -382,7 +382,15 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
   Future<void> _injectCheckinScript() async {
     try {
       final js = await rootBundle.loadString('assets/kq/kq.user.js');
-      await _controller?.runJavaScript(js);
+      // 后台引擎接管后，网页脚本不再自己常驻：两条链路同时提交会撞车，
+      // 也会在服务端留下两次请求的痕迹。面板的按钮仍然可用（手动）。
+      final autoConfig = await KqAutoStore.readConfig();
+      final guard = autoConfig.enabled
+          ? "try{var c=JSON.parse(localStorage.getItem('kq_mobile_cfg')||'{}');"
+              "c.autoStart=false;localStorage.setItem('kq_mobile_cfg',JSON.stringify(c));"
+              "}catch(e){}"
+          : '';
+      await _controller?.runJavaScript('$guard$js');
     } catch (_) {
       // 资源缺失或当前页面不支持脚本时静默跳过，不影响网页本身。
     }

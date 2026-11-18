@@ -41,7 +41,7 @@ Future<void> kqInitAutoService() async {
       foregroundServiceNotificationId: kqAutoNotificationId,
       autoStartOnBoot: true,
     ),
-    iosConfiguration: const IosConfiguration(
+    iosConfiguration: IosConfiguration(
       autoStart: false,
       onForeground: kqAutoEntryPoint,
       onBackground: kqAutoEntryPoint,
