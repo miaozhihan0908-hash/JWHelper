@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:ui';
 
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/kq_client.dart';
 import 'package:JWHelper/features/attendance/data/kq_signer.dart';
@@ -29,8 +31,52 @@ const Duration _scheduleTtl = Duration(minutes: 10);
 /// 两次签到尝试之间的最小间隔（避免窗口内每 20 秒打一次）。
 const Duration _attemptCooldown = Duration(minutes: 3);
 
+/// 把前台服务要用的通知通道真正建出来。
+///
+/// 「一开后台守护就闪退」的真凶就在这里：`AndroidConfiguration` 指定的
+/// `notificationChannelId` 如果不存在，`startForeground()` 会拿着一个野
+/// channel 去发通知，系统判定
+/// `invalid channel for service notification`，进而抛
+/// `CannotPostForegroundServiceNotificationException`。这个异常抛在主线程，
+/// 进程当场死，Dart 侧 try/catch 完全兜不住——所以只能靠「先建通道」从源头
+/// 掐掉。flutter_background_service 不替我们建自定义通道，必须自己来。
+///
+/// 前台服务通知的通道重要性必须是 LOW（不能是 NONE），否则同样被判非法。
+Future<void> _ensureAutoNotificationChannel() async {
+  if (!Platform.isAndroid) return;
+  try {
+    final plugin = FlutterLocalNotificationsPlugin();
+    await plugin.initialize(
+      const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      ),
+    );
+    await plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.createNotificationChannel(
+          const AndroidNotificationChannel(
+            kqAutoChannelId,
+            '考勤守护',
+            description: '常驻通知栏，保证后台签到不被系统回收',
+            importance: Importance.low,
+            playSound: false,
+            enableVibration: false,
+            showBadge: false,
+          ),
+        );
+  } catch (e) {
+    // 建通道失败不掐断启动流程：让 startService 自己把错误报回来，
+    // 至少能落到启动标记里，而不是又一次静默闪退。
+    kqLastStartError = '通知通道创建失败：$e';
+  }
+}
+
 /// 在 App 启动时调用一次即可（重复调用无副作用）。
 Future<void> kqInitAutoService() async {
+  // 必须在 configure/startService 之前：channel 不存在时 startForeground 必崩。
+  await _ensureAutoNotificationChannel();
   final service = FlutterBackgroundService();
   await service.configure(
     androidConfiguration: AndroidConfiguration(
@@ -78,11 +124,13 @@ Future<bool> kqStartAutoService() async {
   try {
     // 崩溃取证：进程若被原生层带走，这个标记会停在 starting。
     await KqAutoStore.saveStartMarker(
-        'starting ${DateTime.now().toIso8601String()}');
+      'starting ${DateTime.now().toIso8601String()}',
+    );
     final ok = await service.startService();
     if (ok) {
       await KqAutoStore.saveStartMarker(
-          'ok ${DateTime.now().toIso8601String()}');
+        'ok ${DateTime.now().toIso8601String()}',
+      );
     } else {
       kqLastStartError = 'startService 返回 false';
       await KqAutoStore.saveStartMarker('false');
@@ -127,8 +175,10 @@ Future<String> kqServiceDiagnose() async {
   final marker = await KqAutoStore.readStartMarker();
   buf.writeln('启动标记: ${marker.isEmpty ? '（没有记录）' : marker}');
   if (marker.startsWith('starting') && !running) {
-    buf.writeln('  ↑ 标记停在 starting 且服务没跑起来：进程是被原生层带崩的，'
-        '不是返回值失败。把这段发我。');
+    buf.writeln(
+      '  ↑ 标记停在 starting 且服务没跑起来：进程是被原生层带崩的，'
+      '不是返回值失败。把这段发我。',
+    );
   }
   final beat = await KqAutoStore.readBeat();
   buf.writeln('服务心跳: ${beat.isEmpty ? '（没有，说明服务从没跑起来过）' : beat}');
@@ -193,7 +243,8 @@ void kqAutoEntryPoint(ServiceInstance service) async {
 
       final cfg = await KqAutoStore.readConfig();
       if (!cfg.enabled && !force) return;
-      if (!force && (now.hour < _activeHourStart || now.hour >= _activeHourEnd)) {
+      if (!force &&
+          (now.hour < _activeHourStart || now.hour >= _activeHourEnd)) {
         return;
       }
 
