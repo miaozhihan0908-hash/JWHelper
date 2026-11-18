@@ -25,7 +25,8 @@ import 'package:flutter/services.dart' show rootBundle;
 /// （例如改用 `Padding` + `MediaQuery.viewInsets`）。
 class CampusWebViewScreen extends StatefulWidget {
   /// 智慧考勤网页版地址。
-  static const String attendanceWebUrl = 'https://qdxt.sdpei.edu.cn:7083/pages/sdpei/sso';
+  static const String attendanceWebUrl =
+      'https://qdxt.sdpei.edu.cn:7083/pages/sdpei/sso';
 
   const CampusWebViewScreen({super.key});
 
@@ -100,7 +101,9 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
       final actions = _actions;
       _registeredActions = false;
       _actions = null;
-      WidgetsBinding.instance.addPostFrameCallback((_) => actions?.unregister());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => actions?.unregister(),
+      );
     }
     super.dispose();
   }
@@ -238,9 +241,9 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
   }
 
   void _showSnack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _editAccount() async {
@@ -267,7 +270,8 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
 
       var fragment = uri.fragment;
       if (fragment.isNotEmpty && !fragment.contains('userToken=')) {
-        fragment = '$fragment${fragment.contains('?') ? '&' : '?'}userToken=${Uri.encodeQueryComponent(userToken)}';
+        fragment =
+            '$fragment${fragment.contains('?') ? '&' : '?'}userToken=${Uri.encodeQueryComponent(userToken)}';
       }
 
       uri = uri.replace(queryParameters: query, fragment: fragment);
@@ -295,17 +299,32 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
     for (final domain in domains) {
       if (userToken.isNotEmpty) {
         await _cookieManager?.setCookie(
-          WebViewCookie(name: 'userToken', value: userToken, domain: domain, path: '/'),
+          WebViewCookie(
+            name: 'userToken',
+            value: userToken,
+            domain: domain,
+            path: '/',
+          ),
         );
       }
       if (ctTicket.isNotEmpty) {
         await _cookieManager?.setCookie(
-          WebViewCookie(name: 'CTTICKET', value: ctTicket, domain: domain, path: '/'),
+          WebViewCookie(
+            name: 'CTTICKET',
+            value: ctTicket,
+            domain: domain,
+            path: '/',
+          ),
         );
       }
       if (appCtTicket.isNotEmpty) {
         await _cookieManager?.setCookie(
-          WebViewCookie(name: 'APPCTTICKET', value: appCtTicket, domain: domain, path: '/'),
+          WebViewCookie(
+            name: 'APPCTTICKET',
+            value: appCtTicket,
+            domain: domain,
+            path: '/',
+          ),
         );
       }
     }
@@ -320,11 +339,30 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
     Uri targetUri,
   ) async {
     try {
+      // 智慧考勤 /unifast/** 的接口认证靠 Tomcat 的 JSESSIONID（cookie path
+      // 就是 /unifast），而它是 HttpOnly —— JS 的 document.cookie 读不到，
+      // 只能走原生 CookieManager。少了它，后台引擎每个请求都吃 401
+      // 「未找到授权信息，请重新登录！」，表现就是课表拉不到、记录拉不到。
+      String jsessionId = '';
+      try {
+        final cookies = await WebViewCookieManager().getCookies(
+          Uri.parse('https://qdxt.sdpei.edu.cn:7083/unifast/'),
+        );
+        for (final cookie in cookies) {
+          if (cookie.name == 'JSESSIONID' && cookie.value.isNotEmpty) {
+            jsessionId = cookie.value;
+            break;
+          }
+        }
+      } catch (_) {
+        // 取不到就退化成不带 session：接口会 401，但不影响网页版本身。
+      }
       await KqAutoStore.saveAuth(
         userToken: provider.userToken,
         ctTicket: provider.ctTicket,
         appCtTicket: provider.appCtTicket,
         studentNo: provider.savedUsername,
+        jsessionId: jsessionId,
       );
       final config = await KqAutoStore.readConfig();
       if (config.enabled) {
@@ -345,9 +383,9 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(builder: (_) => const KqAutoScreen()),
-          );
+          Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: (_) => const KqAutoScreen()));
         },
         child: Padding(
           padding: const EdgeInsets.all(9),
@@ -361,7 +399,8 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
     );
   }
 
-  Future<void> _injectTokenToWebStorage() async {    if (_activeToken.isEmpty) {
+  Future<void> _injectTokenToWebStorage() async {
+    if (_activeToken.isEmpty) {
       return;
     }
     final escaped = _activeToken
@@ -391,8 +430,8 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
       } catch (_) {}
       final guard = bgRunning
           ? "try{var c=JSON.parse(localStorage.getItem('kq_mobile_cfg')||'{}');"
-              "c.autoStart=false;localStorage.setItem('kq_mobile_cfg',JSON.stringify(c));"
-              "}catch(e){}"
+                "c.autoStart=false;localStorage.setItem('kq_mobile_cfg',JSON.stringify(c));"
+                "}catch(e){}"
           : '';
       await _controller?.runJavaScript('$guard$js');
     } catch (_) {
@@ -415,9 +454,9 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
     );
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('无法打开浏览器')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('无法打开浏览器')));
     }
   }
 
@@ -436,11 +475,7 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
               WebViewWidget(controller: _controller!),
               if (_isPreparing || _isLoading)
                 const Center(child: CircularProgressIndicator()),
-              Positioned(
-                right: 10,
-                bottom: 12,
-                child: _buildAutoEntry(),
-              ),
+              Positioned(right: 10, bottom: 12, child: _buildAutoEntry()),
             ],
           ),
         ),
@@ -497,7 +532,11 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
         padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
         child: Row(
           children: [
-            Icon(Icons.info_outline, size: 16, color: theme.colorScheme.onErrorContainer),
+            Icon(
+              Icons.info_outline,
+              size: 16,
+              color: theme.colorScheme.onErrorContainer,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -507,10 +546,7 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
                 ),
               ),
             ),
-            TextButton(
-              onPressed: _refreshAuth,
-              child: const Text('重新登录'),
-            ),
+            TextButton(onPressed: _refreshAuth, child: const Text('重新登录')),
           ],
         ),
       ),
