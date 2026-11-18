@@ -81,6 +81,13 @@ class KqApplyResult {
   String toString() => message;
 }
 
+/// 一次按天拉取的结果：记录 + 每门课的服务端回话。
+class KqDayFetch {
+  const KqDayFetch({required this.records, required this.notes});
+  final List<KqAttendanceRecord> records;
+  final List<String> notes;
+}
+
 /// 把 `findKqAttendanceList` 的 data 摊平成记录列表。
 ///
 /// 四类列表在服务端是分开返回的，标签写死在这里，便于界面按分类展示。
@@ -186,19 +193,81 @@ class KqRecordTool {
     return out;
   }
 
-  /// 拉某天全部课的记录。
-  Future<List<KqAttendanceRecord>> listByDay(DateTime day) async {
-    final courses = await coursesOn(day);
+  /// 拉某天全部课的记录，并把每门课的服务端回话逐条记下来。
+  ///
+  /// 之前这里把失败原因只写进共享日志，界面上只看到"没有记录"，
+  /// 分不清是没课、没权限还是参数不对。现在原因跟着结果一起返回。
+  Future<KqDayFetch> fetchDay(DateTime day) async {
+    final notes = <String>[];
+    dynamic resp;
+    try {
+      resp = await _c.schedule(ymd(day), studentNo);
+    } catch (e) {
+      notes.add('课表请求异常：$e');
+      await _log('× 课表请求异常：$e');
+      return KqDayFetch(records: const [], notes: notes);
+    }
+
+    final courses = coursesOf(resp);
+    if (courses.isEmpty) {
+      final code = resp is Map ? '${resp['code']}' : '';
+      final msg = resp is Map
+          ? '${resp['msg'] ?? resp['message'] ?? ''}'
+          : '$resp';
+      notes.add('课表为空  code=$code  msg=${_brief(msg)}');
+      await _log('× 课表为空 code=$code ${_brief(msg)}');
+      return KqDayFetch(records: const [], notes: notes);
+    }
+    notes.add('课表 ${courses.length} 门课（${ymd(day)}）');
+
     final out = <KqAttendanceRecord>[];
     for (final c in courses) {
       final id = '${c['id'] ?? ''}';
-      if (id.isEmpty) continue;
-      final rows = await listByPaike(id, courseName: '${c['courseName'] ?? ''}');
-      out.addAll(rows);
+      final name = '${c['courseName'] ?? '课程'}';
+      if (id.isEmpty) {
+        notes.add('$name：没有 paikeId，跳过');
+        continue;
+      }
+      dynamic r;
+      try {
+        r = await _c.findKqAttendanceList(id);
+      } catch (e) {
+        notes.add('$name：记录请求异常 $e');
+        continue;
+      }
+      final code = r is Map ? '${r['code']}' : '';
+      final msg = r is Map ? '${r['msg'] ?? r['message'] ?? ''}' : '$r';
+      if (code != '200') {
+        notes.add('$name：code=$code  msg=${_brief(msg)}');
+        await _log('× $name 记录 code=$code ${_brief(msg)}');
+      } else {
+        final data = r is Map ? r['data'] : null;
+        if (data is! Map) {
+          notes.add('$name：data 不是对象  ${_brief(data)}');
+        } else {
+          final rows = parseAttendanceRecords(
+            Map<String, dynamic>.from(data),
+            paikeId: id,
+            courseName: name,
+          );
+          out.addAll(rows);
+          final counts = {
+            '请假': (data['qingJiaList'] as List?)?.length ?? 0,
+            '正常': (data['zhengChangList'] as List?)?.length ?? 0,
+            '异常': (data['yiChangList'] as List?)?.length ?? 0,
+            '待考勤': (data['daiKaoQinList'] as List?)?.length ?? 0,
+          };
+          notes.add('$name：ok  ${counts.entries.map((e) => '${e.key}${e.value}').join(' ')}');
+        }
+      }
       await Future<void>.delayed(const Duration(milliseconds: 400));
     }
-    return out;
+    return KqDayFetch(records: out, notes: notes);
   }
+
+  /// 兼容旧调用：只要记录本身。
+  Future<List<KqAttendanceRecord>> listByDay(DateTime day) async =>
+      (await fetchDay(day)).records;
 
   /// 只保留自己的记录（按学号比对）。学号为空时全部保留。
   List<KqAttendanceRecord> mine(List<KqAttendanceRecord> rows) {

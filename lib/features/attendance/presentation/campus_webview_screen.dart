@@ -382,10 +382,14 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
   Future<void> _injectCheckinScript() async {
     try {
       final js = await rootBundle.loadString('assets/kq/kq.user.js');
-      // 后台引擎接管后，网页脚本不再自己常驻：两条链路同时提交会撞车，
-      // 也会在服务端留下两次请求的痕迹。面板的按钮仍然可用（手动）。
-      final autoConfig = await KqAutoStore.readConfig();
-      final guard = autoConfig.enabled
+      // 只有后台服务**确实在跑**时才停掉网页脚本的自启。
+      // 之前按配置项判断，结果服务启动失败时两条链路同时哑掉，什么都不签。
+      var bgRunning = false;
+      try {
+        final autoConfig = await KqAutoStore.readConfig();
+        if (autoConfig.enabled) bgRunning = await kqIsAutoServiceRunning();
+      } catch (_) {}
+      final guard = bgRunning
           ? "try{var c=JSON.parse(localStorage.getItem('kq_mobile_cfg')||'{}');"
               "c.autoStart=false;localStorage.setItem('kq_mobile_cfg',JSON.stringify(c));"
               "}catch(e){}"

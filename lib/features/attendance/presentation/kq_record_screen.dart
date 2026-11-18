@@ -21,6 +21,7 @@ class _KqRecordScreenState extends State<KqRecordScreen> {
   String _status = '';
   List<KqAttendanceRecord> _rows = const [];
   List<KqProbeResult> _probes = const [];
+  List<String> _notes = const [];
   String _cookie = '';
   String _studentNo = '';
 
@@ -74,13 +75,14 @@ class _KqRecordScreenState extends State<KqRecordScreen> {
       _status = '拉取 ${_d(_day)} 的记录…';
     });
     try {
-      final all = await tool.listByDay(_day);
-      final mine = tool.mine(all);
+      final fetch = await tool.fetchDay(_day);
+      final mine = tool.mine(fetch.records);
       if (!mounted) return;
       setState(() {
         _rows = mine;
+        _notes = fetch.notes;
         _status = mine.isEmpty
-            ? '这一天没有我的考勤记录（共拉到 ${all.length} 条）'
+            ? '没有可显示的记录（拉到 ${fetch.records.length} 条）— 原因见下方'
             : '共 ${mine.length} 条记录';
       });
     } catch (e) {
@@ -260,6 +262,61 @@ class _KqRecordScreenState extends State<KqRecordScreen> {
               ),
             ],
           ),
+          if (_notes.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Card(
+              elevation: 0,
+              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text('拉取明细', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Spacer(),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () async {
+                            await showDialog<void>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('原始回话'),
+                                content: SingleChildScrollView(
+                                  child: SelectableText(
+                                    _notes.join('\n'),
+                                    style: const TextStyle(
+                                        fontFamily: 'monospace', fontSize: 11.5),
+                                  ),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(ctx).pop(),
+                                    child: const Text('关闭'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.copy_all, size: 18),
+                          tooltip: '可选中复制',
+                        ),
+                      ],
+                    ),
+                    ..._notes.map((n) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text(
+                            n,
+                            style: const TextStyle(
+                                fontFamily: 'monospace', fontSize: 11, height: 1.4),
+                          ),
+                        )),
+                  ],
+                ),
+              ),
+            ),
+          ],
           if (_probes.isNotEmpty) ...[
             const SizedBox(height: 12),
             Card(

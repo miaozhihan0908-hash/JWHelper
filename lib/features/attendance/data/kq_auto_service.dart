@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/kq_client.dart';
 import 'package:JWHelper/features/attendance/data/kq_signer.dart';
@@ -12,8 +13,9 @@ import 'package:JWHelper/features/attendance/data/kq_signer.dart';
 /// 就是这么失效的）。前台服务带常驻通知，系统不会随手回收，其中的 Dart
 /// isolate 可以跑定时器。
 ///
-/// 这里刻意不依赖 `flutter_background_service_android`：只用通用接口，
-/// 通知内容固定为「考勤守护」，运行状态在 App 内的控制台里看。
+/// 这里要显式声明前台服务类型（`foregroundServiceTypes: dataSync`），并与
+/// Manifest 里的 `android:foregroundServiceType` 保持一致：Android 14 起
+/// `startForeground` 没有类型会抛 SecurityException，直接把进程带走。
 const String kqAutoChannelId = 'kq_auto_channel';
 const int kqAutoNotificationId = 8811;
 
@@ -39,7 +41,11 @@ Future<void> kqInitAutoService() async {
       initialNotificationTitle: '考勤守护',
       initialNotificationContent: '待命中',
       foregroundServiceNotificationId: kqAutoNotificationId,
-      autoStartOnBoot: true,
+      // 必须显式给类型：Android 14+ 的 startForeground 没有类型会直接崩进程
+      foregroundServiceTypes: const [AndroidForegroundType.dataSync],
+      // 开机自启走的是插件自己的 BootReceiver，这条路径在国产 ROM 上最容易
+      // 出问题（配置还没准备好就被拉起来）。宁可让用户开一次 App 再续上。
+      autoStartOnBoot: false,
     ),
     iosConfiguration: IosConfiguration(
       autoStart: false,
@@ -49,23 +55,73 @@ Future<void> kqInitAutoService() async {
   );
 }
 
+/// 最近一次启动失败的原因（给界面显示）。
+String kqLastStartError = '';
+
 /// 启动后台守护。返回是否已在运行。
+///
+/// 每一步都单独兜住异常：启动失败要能回话，最怕的是整个进程被原生层带走。
 Future<bool> kqStartAutoService() async {
+  kqLastStartError = '';
   final service = FlutterBackgroundService();
-  if (await service.isRunning()) return true;
-  await kqInitAutoService();
-  return service.startService();
+  try {
+    if (await service.isRunning()) return true;
+  } catch (e) {
+    kqLastStartError = 'isRunning 失败：$e';
+  }
+  try {
+    await kqInitAutoService();
+  } catch (e) {
+    kqLastStartError = 'configure 失败：$e';
+    return false;
+  }
+  try {
+    final ok = await service.startService();
+    if (!ok) kqLastStartError = 'startService 返回 false';
+    return ok;
+  } catch (e) {
+    kqLastStartError = 'startService 异常：$e';
+    return false;
+  }
 }
 
 Future<void> kqStopAutoService() async {
-  final service = FlutterBackgroundService();
-  if (!await service.isRunning()) return;
-  service.invoke('stop');
+  try {
+    final service = FlutterBackgroundService();
+    if (!await service.isRunning()) return;
+    service.invoke('stop');
+  } catch (_) {}
 }
 
-Future<bool> kqIsAutoServiceRunning() => FlutterBackgroundService().isRunning();
+Future<bool> kqIsAutoServiceRunning() async {
+  try {
+    return await FlutterBackgroundService().isRunning();
+  } catch (_) {
+    return false;
+  }
+}
 
-/// 开关是开着的就把服务拉起来（冷启动 / 开机自启后恢复）。
+/// 服务状态自检，返回一段可显示的文本。
+Future<String> kqServiceDiagnose() async {
+  final buf = StringBuffer();
+  final cfg = await KqAutoStore.readConfig();
+  buf.writeln('开关: ${cfg.enabled ? '开' : '关'}  真提交: ${cfg.commit ? '开' : '关'}');
+  bool running = false;
+  try {
+    running = await FlutterBackgroundService().isRunning();
+    buf.writeln('isRunning: $running');
+  } catch (e) {
+    buf.writeln('isRunning 异常: $e');
+  }
+  if (kqLastStartError.isNotEmpty) buf.writeln('上次启动错误: $kqLastStartError');
+  final beat = await KqAutoStore.readBeat();
+  buf.writeln('服务心跳: ${beat.isEmpty ? '（没有，说明服务从没跑起来过）' : beat}');
+  final log = await KqAutoStore.readLog();
+  buf.writeln('日志行数: ${log.length}');
+  return buf.toString();
+}
+
+/// 开关是开着的就把服务拉起来（冷启动后恢复）。
 Future<bool> kqStartAutoServiceIfEnabled() async {
   final cfg = await KqAutoStore.readConfig();
   if (!cfg.enabled) return false;

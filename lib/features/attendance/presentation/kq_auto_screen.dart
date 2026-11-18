@@ -63,19 +63,63 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
   Future<void> _toggleEnabled(bool enabled) async {
     setState(() => _busy = true);
     try {
-      final next = _config.copyWith(enabled: enabled);
-      await KqAutoStore.saveConfig(next);
-      if (enabled) {
-        final started = await kqStartAutoService();
-        if (!started) {
-          // 有些 ROM 需要先允许通知，再启动前台服务才会成功。
-          await Permission.notification.request();
-          await kqStartAutoService();
-        }
-      } else {
+      if (!enabled) {
+        await KqAutoStore.saveConfig(_config.copyWith(enabled: false));
         await kqStopAutoService();
+        await _reload();
+        return;
       }
+
+      // 1) 先单独要通知权限：前台服务没有通知会被系统直接掐掉。
+      //    这一步放在启动之前，避免它和启动异常混在一起看不清是谁的问题。
+      try {
+        final st = await Permission.notification.status;
+        if (!st.isGranted) await Permission.notification.request();
+      } catch (_) {}
+
+      // 2) 真正启动，失败要说清楚为什么。
+      final started = await kqStartAutoService();
+      if (!started) {
+        await KqAutoStore.saveConfig(_config.copyWith(enabled: false));
+        final reason = kqLastStartError.isEmpty ? '未知原因' : kqLastStartError;
+        await KqAutoStore.appendLog('× 后台守护启动失败：$reason');
+        await _reload();
+        await _toast('启动失败：$reason\n（网页版的常驻仍在，不受影响）');
+        return;
+      }
+
+      await KqAutoStore.saveConfig(_config.copyWith(enabled: true));
       await _reload();
+      await _toast('已启动，通知栏会出现「考勤守护」');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// 服务自检：把能不能跑、上次错误、心跳、日志行数一次说清楚。
+  Future<void> _diagnose() async {
+    setState(() => _busy = true);
+    try {
+      final text = await kqServiceDiagnose();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('服务自检'),
+          content: SingleChildScrollView(
+            child: SelectableText(
+              text,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -220,6 +264,11 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
                 onPressed: _busy ? null : _selfTest,
                 icon: const Icon(Icons.network_check, size: 18),
                 label: const Text('自检'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _diagnose,
+                icon: const Icon(Icons.medical_information, size: 18),
+                label: const Text('服务自检'),
               ),
               FilledButton.tonalIcon(
                 onPressed: _busy ? null : _runNow,

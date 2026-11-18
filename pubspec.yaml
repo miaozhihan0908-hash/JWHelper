@@ -39,6 +39,9 @@ dependencies:
   webview_flutter_android: ^4.14.1
   # 后台签到引擎：前台服务 + 独立 isolate，App 退到后台也能到点提交
   flutter_background_service: ^5.0.0
+  # 显式指定前台服务类型：Android 14 起 startForeground 必须带类型，
+  # 否则原生层抛 SecurityException 直接把进程带走（就是那个闪退）
+  flutter_background_service_android: ^6.0.0
 
 dev_dependencies:
   flutter_test:
