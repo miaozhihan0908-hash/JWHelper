@@ -4,6 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_service.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
 import 'package:JWHelper/features/attendance/data/kq_signer.dart';
+import 'package:JWHelper/features/attendance/presentation/kq_record_screen.dart';
 
 /// 后台签到控制台。
 ///
@@ -229,6 +230,17 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
                 onPressed: _requestBattery,
                 icon: const Icon(Icons.battery_saver, size: 18),
                 label: const Text('电池白名单'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const KqRecordScreen(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.history, size: 18),
+                label: const Text('历史记录'),
               ),
               OutlinedButton.icon(
                 onPressed: () async {

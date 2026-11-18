@@ -38,6 +38,47 @@ class KqClient {
   Future<dynamic> getLoginCode() =>
       http.get('/edu/login/getLoginCode?loginType=h5');
 
+  // ------------------------------------------------------------------
+  // 考勤记录（这几个名字都在教师端代码里，服务端角色校验成不成立要看实测）
+  // ------------------------------------------------------------------
+
+  /// 按排课拉考勤名单：返回 qingJiaList / zhengChangList / yiChangList / daiKaoQinList。
+  Future<dynamic> checkList(String teacherPaikeId) =>
+      http.get('/studentSign/checkList', {'teacherPaikeId': teacherPaikeId});
+
+  /// 考勤查询列表（同上四类，另一个入口）。
+  Future<dynamic> findKqAttendanceList(String teacherPaikeId) =>
+      http.get('/studentPaike/findKqAttendanceList',
+          {'teacherPaikeId': teacherPaikeId});
+
+  /// 改某条考勤结果。attendanceResultStr 是逗号串：1=迟到 2=早退 3=旷课。
+  Future<dynamic> updateKqAttendanceResult(
+          String studentSignId, String attendanceResultStr) =>
+      http.post('/studentPaike/updateKqAttendanceResult', {
+        'studentSignId': studentSignId,
+        'attendanceResultStr': attendanceResultStr,
+      });
+
+  /// 老师代签到。
+  Future<dynamic> signByTeacher(Map<String, dynamic> payload) =>
+      http.post('/studentSign/signByTeacher', payload);
+
+  /// 老师代签退。
+  Future<dynamic> signOutByTeacher(Map<String, dynamic> payload) =>
+      http.post('/studentSign/signOutByTeacher', payload);
+
+  /// 审核签到。
+  Future<dynamic> signInCheckByTeacher(Map<String, dynamic> payload) =>
+      http.post('/studentSign/signInCheckByTeacher', payload);
+
+  /// 审核签退。
+  Future<dynamic> signOutCheckByTeacher(Map<String, dynamic> payload) =>
+      http.post('/studentSign/signOutCheckByTeacher', payload);
+
+  /// 代请假。
+  Future<dynamic> leaveSignByTeacher(Map<String, dynamic> payload) =>
+      http.post('/studentSign/leaveSignByTeacher', payload);
+
   void close() => http.close();
 }
 

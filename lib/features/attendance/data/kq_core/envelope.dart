@@ -30,6 +30,12 @@ class KqHttp {
   final HttpClient _client;
   String? _pub;
 
+  /// 最近一次请求的 HTTP 状态码（探测鉴权边界时要用）。
+  int? lastStatus;
+
+  /// 最近一次请求的原始响应体。
+  String lastRaw = '';
+
   KqHttp({this.token, this.cookie, bool insecure = true})
       : _client = HttpClient()
           ..connectionTimeout = const Duration(seconds: 20) {
@@ -65,6 +71,14 @@ class KqHttp {
       chunks.addAll(c);
     }
     return utf8.decode(chunks, allowMalformed: true);
+  }
+
+  /// 记录状态码与原始响应，供探测矩阵使用。
+  Future<String> _readTracked(HttpClientResponse r) async {
+    lastStatus = r.statusCode;
+    final body = await _read(r);
+    lastRaw = body;
+    return body;
   }
 
   /// 取服务端公钥：响应本身是密文，需要用客户端私钥解开。
@@ -113,7 +127,7 @@ class KqHttp {
           'X-SIGN-B': signB(cipher),
         },
         body: jsonEncode({'reqData': cipher}));
-    return decode(await _read(r));
+    return decode(await _readTracked(r));
   }
 
   Future<dynamic> get(String path, [Map<String, dynamic>? payload]) async {
@@ -128,7 +142,7 @@ class KqHttp {
       headers = {'X-SIGN-P': signP(cipher)};
     }
     final r = await _send('GET', url, headers: headers);
-    return decode(await _read(r));
+    return decode(await _readTracked(r));
   }
 
   void close() => _client.close(force: true);
