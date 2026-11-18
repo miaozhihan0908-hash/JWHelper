@@ -13,6 +13,7 @@ import 'package:JWHelper/app/presentation/home_screen.dart';
 import 'package:JWHelper/infrastructure/network/client.dart';
 import 'package:JWHelper/infrastructure/platform/widget_service.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_service.dart';
+import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,9 +22,14 @@ Future<void> main() async {
   SharedPreferences.getInstance();
   // WidgetService.init() runs in background, doesn't block app launch
   WidgetService.init();
-  // 后台签到：注册前台服务；若开关是开着的就自动续上（冷启动/开机后恢复）
+  // 后台签到：注册前台服务；若开关是开着的就自动续上（冷启动后恢复）
   Future<void>(() async {
     try {
+      // 上一次启动如果停在 starting，说明进程被原生层带崩了，留一条明确记录。
+      final marker = await KqAutoStore.readStartMarker();
+      if (marker.startsWith('starting')) {
+        await KqAutoStore.appendLog('! 上次启动后台服务后进程异常退出（原生崩溃）: $marker');
+      }
       await kqInitAutoService();
       await kqStartAutoServiceIfEnabled();
     } catch (_) {}

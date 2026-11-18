@@ -72,6 +72,7 @@ class KqAutoStore {
   static const String _kLog = 'kq_auto_log';
   static const String _kDone = 'kq_auto_done';
   static const String _kLastBeat = 'kq_auto_beat';
+  static const String _kStartMarker = 'kq_auto_start_marker';
 
   static const int _maxLogLines = 200;
 
@@ -206,6 +207,18 @@ class KqAutoStore {
     map[day] = list;
     await p.setString(_kDone, jsonEncode(map));
   }
+
+  // ---------- 崩溃取证 ----------
+
+  /// 启动前后各写一次标记。若进程被原生层带崩，标记会停在 `starting`，
+  /// 下次打开 App 就能区分"返回 false"和"进程被杀"。
+  static Future<void> saveStartMarker(String value) async {
+    final p = await _prefs;
+    await p.setString(_kStartMarker, value);
+  }
+
+  static Future<String> readStartMarker() async =>
+      (await _prefs).getString(_kStartMarker) ?? '';
 
   // ---------- 心跳 ----------
 

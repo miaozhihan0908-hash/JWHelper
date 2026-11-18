@@ -76,11 +76,21 @@ Future<bool> kqStartAutoService() async {
     return false;
   }
   try {
+    // 崩溃取证：进程若被原生层带走，这个标记会停在 starting。
+    await KqAutoStore.saveStartMarker(
+        'starting ${DateTime.now().toIso8601String()}');
     final ok = await service.startService();
-    if (!ok) kqLastStartError = 'startService 返回 false';
+    if (ok) {
+      await KqAutoStore.saveStartMarker(
+          'ok ${DateTime.now().toIso8601String()}');
+    } else {
+      kqLastStartError = 'startService 返回 false';
+      await KqAutoStore.saveStartMarker('false');
+    }
     return ok;
   } catch (e) {
     kqLastStartError = 'startService 异常：$e';
+    await KqAutoStore.saveStartMarker('error $e');
     return false;
   }
 }
@@ -114,6 +124,12 @@ Future<String> kqServiceDiagnose() async {
     buf.writeln('isRunning 异常: $e');
   }
   if (kqLastStartError.isNotEmpty) buf.writeln('上次启动错误: $kqLastStartError');
+  final marker = await KqAutoStore.readStartMarker();
+  buf.writeln('启动标记: ${marker.isEmpty ? '（没有记录）' : marker}');
+  if (marker.startsWith('starting') && !running) {
+    buf.writeln('  ↑ 标记停在 starting 且服务没跑起来：进程是被原生层带崩的，'
+        '不是返回值失败。把这段发我。');
+  }
   final beat = await KqAutoStore.readBeat();
   buf.writeln('服务心跳: ${beat.isEmpty ? '（没有，说明服务从没跑起来过）' : beat}');
   final log = await KqAutoStore.readLog();
