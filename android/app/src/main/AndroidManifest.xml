@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
@@ -57,11 +58,13 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- 后台签到：flutter_background_service 的前台服务 -->
+        <!-- 后台签到：flutter_background_service 的前台服务。
+             插件自带声明里 exported=true，这里强制改成 false（不给其它 App 启动权）。 -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:foregroundServiceType="dataSync"
-            android:exported="false" />
+            android:exported="false"
+            tools:replace="android:exported" />
         
         <!-- 学业进度 -->
         <receiver android:name=".ProgressWidgetProvider" android:label="学业进度" android:exported="true">
