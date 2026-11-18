@@ -46,8 +46,9 @@ Future<void> _ensureAutoNotificationChannel() async {
   if (!Platform.isAndroid) return;
   try {
     final plugin = FlutterLocalNotificationsPlugin();
+    // v20 起 initialize 改成具名参数（settings:），旧的位置参数写法直接编译失败。
     await plugin.initialize(
-      const InitializationSettings(
+      settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       ),
     );
