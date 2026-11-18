@@ -52,25 +52,36 @@ Future<void> _ensureAutoNotificationChannel() async {
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       ),
     );
-    await plugin
+    final android = plugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
-        >()
-        ?.createNotificationChannel(
-          const AndroidNotificationChannel(
-            kqAutoChannelId,
-            '考勤守护',
-            description: '常驻通知栏，保证后台签到不被系统回收',
-            importance: Importance.low,
-            playSound: false,
-            enableVibration: false,
-            showBadge: false,
-          ),
-        );
+        >();
+    if (android == null) {
+      // 拿不到实例时过去是 `?.` 静默跳过，通道没建、也不报错，最后表现为
+      // 「一开守护就闪退」。现在至少留痕，并且真正兜底的是 MainActivity
+      // 里的原生 ensureKqAutoChannel()。
+      await KqAutoStore.appendLog('· Dart 侧无 Android 通知插件实例，通道由原生侧保证');
+      return;
+    }
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
+        kqAutoChannelId,
+        '考勤守护',
+        description: '常驻通知栏，保证后台签到不被系统回收',
+        importance: Importance.low,
+        playSound: false,
+        enableVibration: false,
+        showBadge: false,
+      ),
+    );
+    await KqAutoStore.appendLog('· 通知通道 $kqAutoChannelId 已就绪');
   } catch (e) {
     // 建通道失败不掐断启动流程：让 startService 自己把错误报回来，
     // 至少能落到启动标记里，而不是又一次静默闪退。
     kqLastStartError = '通知通道创建失败：$e';
+    try {
+      await KqAutoStore.appendLog('× 通知通道创建失败：$e');
+    } catch (_) {}
   }
 }
 
