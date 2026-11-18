@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         山体智慧考勤
 // @namespace    kq.sdpei
-// @version      1.4.3
+// @version      1.4.4
 // @description  自动签到/签退 · 精简版（小到不会被剪贴板截断）
 // @match        *://qdxt.sdpei.edu.cn/*
 // @include      *://qdxt.sdpei.edu.cn:7083/*
@@ -109,7 +109,9 @@ async function pick(c) {
 const AT = (d, s) => { const a = d.split('-').map(Number), b = String(s).split(':').map(Number); return new Date(a[0], a[1] - 1, a[2], b[0], b[1], 0, 0); };
 function WIN(c) {
   const d = Y(new Date()), s = AT(d, c.startTime), e = AT(d, c.endTime);
-  return { signIn: [new Date(+s - cfg.leadMin * 60000), e], signOut: [new Date(+e - cfg.outLeadMin * 60000), new Date(+e + cfg.outLagMin * 60000)] };
+  // 站点自己的按钮判定（schedule 页 mt()）是 startTime~endTime：上课前不许签。
+  // 这里严格对齐，避免课前反复失败在服务端留下多余的预记录与设备日志。
+  return { signIn: [s, e], signOut: [new Date(+e - cfg.outLeadMin * 60000), new Date(+e + cfg.outLagMin * 60000)] };
 }
 const inW = (t, w) => t >= w[0] && t <= w[1];
 // ==KQ-SPLIT==
