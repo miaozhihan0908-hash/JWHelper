@@ -1,4 +1,5 @@
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
+import 'package:JWHelper/features/attendance/data/kq_core/authz_judge.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/kq_client.dart';
 
 /// 一条探测结果。
@@ -171,27 +172,4 @@ class KqAuthzProbe {
     await KqAutoStore.appendLog(m);
     onLog?.call(m);
   }
-}
-
-/// 判定规则：先看业务码，再看文案里的关键词。抽成顶层函数便于单测。
-String judgeProbe({int? http, required String code, required String msg}) {
-  if (code == '200') return '开';
-  if (msg.contains('权限') ||
-      msg.contains('无权') ||
-      msg.contains('角色') ||
-      msg.contains('非法') ||
-      msg.contains('禁止')) {
-    return '关';
-  }
-  if (msg.contains('不存在') ||
-      msg.contains('未找到') ||
-      msg.contains('找不到') ||
-      msg.contains('参数')) {
-    return '开';
-  }
-  if (msg.contains('授权') || msg.contains('登录') || msg.contains('过期')) {
-    return '关';
-  }
-  if (http == 403) return '关';
-  return '不明';
 }

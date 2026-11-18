@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:JWHelper/features/attendance/data/kq_authz_probe.dart';
+import 'package:JWHelper/features/attendance/data/kq_core/authz_judge.dart';
 import 'package:JWHelper/features/attendance/data/kq_record_tool.dart';
 
 void main() {
