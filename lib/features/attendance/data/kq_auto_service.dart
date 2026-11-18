@@ -43,8 +43,8 @@ Future<void> kqInitAutoService() async {
     ),
     iosConfiguration: IosConfiguration(
       autoStart: false,
-      onForeground: kqAutoEntryPoint,
-      onBackground: kqAutoEntryPoint,
+      onForeground: kqIosEntryPoint,
+      onBackground: kqIosEntryPoint,
     ),
   );
 }
@@ -167,4 +167,11 @@ void kqAutoEntryPoint(ServiceInstance service) async {
 
   await tick();
   Timer.periodic(const Duration(seconds: 20), (_) => tick());
+}
+
+/// iOS 侧的回调签名要求返回 bool，这里只是转调同一个入口。
+@pragma('vm:entry-point')
+Future<bool> kqIosEntryPoint(ServiceInstance service) async {
+  kqAutoEntryPoint(service);
+  return true;
 }
