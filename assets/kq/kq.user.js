@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         山体智慧考勤 · DEBUG
 // @namespace    kq.sdpei
-// @version      1.4.7dbg
+// @version      1.4.8dbg
 // @description  调试版：全量日志 / 状态快照 / 强制签到 / 日志导出
 // @match        *://qdxt.sdpei.edu.cn/*
 // @include      *://qdxt.sdpei.edu.cn:7083/*
@@ -15,7 +15,7 @@ if (window.__KQ_MOBILE__) return;
 window.__KQ_MOBILE__ = true;
 const TO = (m, c) => { try { const d = document.createElement('div'); d.textContent = m; d.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:2147483647;background:' + (c || 'rgb(185,28,28)') + ';color:#fff;font:12px/1.6 monospace;padding:8px 10px;border-radius:8px;max-width:92vw;white-space:pre-wrap'; (document.body || document.documentElement).appendChild(d); setTimeout(() => d.remove(), 40000); } catch (e) {} };
 try {
-const CF = 'kq_mobile_cfg', DN = 'kq_mobile_done', LF = 'kq_mobile_log', BF = 'kq_mobile_beat', UV = 147;
+const CF = 'kq_mobile_cfg', DN = 'kq_mobile_done', LF = 'kq_mobile_log', BF = 'kq_mobile_beat', UV = 148;
 const cfg = Object.assign({ gpsMode: 'auto', fixedGps: '', jitterM: 8, lowTrace: true, jitterSigma: 10, arrivalSpreadMin: 20, idlePollMinutes: 40, leadMin: 10, outLeadMin: 5, outLagMin: 20, faceReport: false, intervalMs: 45000, commit: false, autoStart: true, debug: false }, JSON.parse(localStorage.getItem(CF) || '{}'));
 if (cfg.uv !== UV) { cfg.uv = UV; cfg.debug = true; cfg.intervalMs = 15000; cfg.idlePollMinutes = 600; cfg.autoStart = true; localStorage.setItem(CF, JSON.stringify(cfg)); }
 const save = () => localStorage.setItem(CF, JSON.stringify(cfg));
@@ -189,8 +189,8 @@ async function confirmSign(no, id) {
     return ok;
   } catch (e) { say('  确认失败 ' + clip((e && e.message) || e, 80), 'err'); return false; }
 }
-async function sign(force) {
-  if (busy) return 0;
+async function sign(force, now) {
+  if (busy) { say('正忙（上一轮还没走完），等几秒再点'); return 0; }
   busy = true;
   try {
     const cm = force || cfg.commit;
@@ -210,10 +210,10 @@ async function sign(force) {
       }
       const key = Y(t) + '|' + c.id;
       if (!force && isDone(key)) { if (cfg.debug) note(c, 'd', '今天已标记完成'); continue; }
-      if (!force && cfg.lowTrace) {
+      if (!force && !now && cfg.lowTrace) {
         if (!arr.has(key)) { const sp = (cfg.arrivalSpreadMin == null ? 20 : cfg.arrivalSpreadMin) * 60000; const tg = Math.min(+w.signIn[0] + Math.random() * sp, +AT(Y(t), c.startTime) + 300000); arr.set(key, new Date(Math.max(tg, Date.now()))); }
         const eta = arr.get(key);
-        if (eta - t > 1000) { note(c, 'a', '已排队，' + HM(eta) + ' 出发'); continue; }
+        if (eta - t > 1000) { note(c, 'a', '已排队 ' + HM(eta) + ' 出发（要立刻签就再点一次「签到」）'); continue; }
       }
       let gps;
       try { gps = await pick(c); } catch (e) { say(c.courseName + '：' + e.message, 'err'); continue; }
@@ -346,7 +346,11 @@ function start() {
     try {
       if (cfg.debug && TN % 4 === 1) say('心跳#' + TN + ' ' + (near() ? 'near' : 'idle') + ' 课' + (SC.data || []).length);
       beat();
-      if (cfg.lowTrace && !cfg.debug) { if (SC.date !== Y(new Date())) await sched(true); if (!near(cfg.idlePollMinutes)) { UI.refresh(); return; } }
+      if (cfg.lowTrace && !cfg.debug) {
+        const fresh = SC.date !== Y(new Date()) || !SC.at || Date.now() - SC.at > 600000;
+        if (fresh) await sched(true);
+        if (!near(cfg.idlePollMinutes)) return;
+      }
       await sign(); await signout();
     } catch (e) { say('× 轮询异常 ' + clip((e && e.message) || e, 140), 'err'); }
     UI.refresh();
@@ -406,7 +410,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   const log = E('div', 'max-height:190px;overflow:auto;background:rgb(11,18,32);border-radius:8px;padding:6px;font:10px/1.45 monospace;color:rgb(156,163,175);white-space:pre-wrap;-webkit-user-select:text;user-select:text');
   const btn = (l, f, ex) => { const b = E('button', B + (ex || ''), l); b.addEventListener('click', f); return b; };
   const rows = [E('div', 'display:flex;gap:6px;margin:6px 0'), E('div', 'display:flex;gap:6px;margin:6px 0'), E('div', 'display:flex;gap:6px;margin:6px 0')];
-  const b1 = btn('签到', () => sign());
+  const b1 = btn('签到', () => sign(0, 1));
   const b2 = btn('签退', () => signout());
   const b3 = btn('', () => { cfg.commit = !cfg.commit; save(); say(cfg.commit ? '已开启提交，会真签' : '已切回演练'); }, ';background:rgb(124,45,18)');
   const b4 = btn('', () => (tm ? stop() : start()));
@@ -438,7 +442,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   try {
     let last = '';
     try { const b = JSON.parse(localStorage.getItem(BF) || 'null'); if (b && b.at) last = '上次心跳 ' + ST(new Date(b.at)) + ' #' + b.n; } catch (e) {}
-    say('=== 1.4.7dbg 启动 ' + ST(new Date()) + ' ===');
+    say('=== 1.4.8dbg 启动 ' + ST(new Date()) + ' ===');
     if (last) say(last + '（说明刷新过/被杀过）');
     await waitMod(40);
     UI.refresh();
@@ -454,6 +458,6 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
     if (cfg.autoStart) start();
   } catch (e) { say('× 初始化失败 ' + clip((e && e.message) || e, 160), 'err'); UI.refresh(); }
 })();
-window.KQ = { cfg, saveCfg: save, sign, signout, signForce: force, dump, exportLog, clearLog, startAuto: start, stopAuto: stop, studentNo, api, say, evaluate: evl, windows: WIN, pickGps: pick, log: () => LB.join('\n') };
+window.KQ = { cfg, saveCfg: save, sign, signNow: () => sign(0, 1), signout, signForce: force, dump, exportLog, clearLog, startAuto: start, stopAuto: stop, studentNo, api, say, evaluate: evl, windows: WIN, pickGps: pick, log: () => LB.join('\n') };
 } catch (e) { console.error('[KQ] 启动失败', e); TO('KQ 启动失败：' + (e && e.message || e) + '\n截图发我', 'rgb(185,28,28)'); }
 })();
