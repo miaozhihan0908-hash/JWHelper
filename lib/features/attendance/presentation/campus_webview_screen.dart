@@ -345,8 +345,10 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
       // 「未找到授权信息，请重新登录！」，表现就是课表拉不到、记录拉不到。
       String jsessionId = '';
       try {
+        // webview_flutter 4.14 起 getCookies 是具名参数 domain:（早期版本
+        // 是位置参数，照旧写法会编译失败）。
         final cookies = await WebViewCookieManager().getCookies(
-          Uri.parse('https://qdxt.sdpei.edu.cn:7083/unifast/'),
+          domain: Uri.parse('https://qdxt.sdpei.edu.cn:7083/unifast/'),
         );
         for (final cookie in cookies) {
           if (cookie.name == 'JSESSIONID' && cookie.value.isNotEmpty) {
