@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         山体智慧考勤 · DEBUG
 // @namespace    kq.sdpei
-// @version      1.4.6dbg
+// @version      1.4.7dbg
 // @description  调试版：全量日志 / 状态快照 / 强制签到 / 日志导出
 // @match        *://qdxt.sdpei.edu.cn/*
 // @include      *://qdxt.sdpei.edu.cn:7083/*
@@ -15,7 +15,7 @@ if (window.__KQ_MOBILE__) return;
 window.__KQ_MOBILE__ = true;
 const TO = (m, c) => { try { const d = document.createElement('div'); d.textContent = m; d.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:2147483647;background:' + (c || 'rgb(185,28,28)') + ';color:#fff;font:12px/1.6 monospace;padding:8px 10px;border-radius:8px;max-width:92vw;white-space:pre-wrap'; (document.body || document.documentElement).appendChild(d); setTimeout(() => d.remove(), 40000); } catch (e) {} };
 try {
-const CF = 'kq_mobile_cfg', DN = 'kq_mobile_done', LF = 'kq_mobile_log', BF = 'kq_mobile_beat', UV = 146;
+const CF = 'kq_mobile_cfg', DN = 'kq_mobile_done', LF = 'kq_mobile_log', BF = 'kq_mobile_beat', UV = 147;
 const cfg = Object.assign({ gpsMode: 'auto', fixedGps: '', jitterM: 8, lowTrace: true, jitterSigma: 10, arrivalSpreadMin: 20, idlePollMinutes: 40, leadMin: 10, outLeadMin: 5, outLagMin: 20, faceReport: false, intervalMs: 45000, commit: false, autoStart: true, debug: false }, JSON.parse(localStorage.getItem(CF) || '{}'));
 if (cfg.uv !== UV) { cfg.uv = UV; cfg.debug = true; cfg.intervalMs = 15000; cfg.idlePollMinutes = 600; cfg.autoStart = true; localStorage.setItem(CF, JSON.stringify(cfg)); }
 const save = () => localStorage.setItem(CF, JSON.stringify(cfg));
@@ -27,6 +27,7 @@ const SL = ms => new Promise(r => setTimeout(r, ms));
 const DM = (() => { try { return JSON.parse(localStorage.getItem(DN) || '{}'); } catch (e) { return {}; } })();
 const isDone = k => (DM[Y(new Date())] || []).indexOf(k) >= 0;
 const mkDone = k => { const d = Y(new Date()); (DM[d] = DM[d] || []).push(k); localStorage.setItem(DN, JSON.stringify(DM)); };
+const undDone = k => { const d = Y(new Date()); const a = DM[d] || []; const i = a.indexOf(k); if (i >= 0) a.splice(i, 1); try { localStorage.setItem(DN, JSON.stringify(DM)); } catch (e) {} };
 const GS = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
 const UID = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxxyxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }) + Date.now().toString(16));
 /* ---------- 日志：内存 400 条 + 落 localStorage，刷新不丢，可导出 ---------- */
@@ -113,10 +114,28 @@ async function pick(c) {
   return lng.toFixed(6) + ',' + lat.toFixed(6);
 }
 const AT = (d, s) => { const a = d.split('-').map(Number), b = String(s).split(':').map(Number); return new Date(a[0], a[1] - 1, a[2], b[0], b[1], 0, 0); };
+/* 服务端给的真实可点区间，例如 signInClickRange="13:40-15:35" */
+function RNG(s) {
+  if (!s) return null;
+  const a = String(s).split('-');
+  if (a.length < 2 || !a[0] || !a[1]) return null;
+  try { const d = Y(new Date()); return [AT(d, a[0]), AT(d, a[1])]; } catch (e) { return null; }
+}
 function WIN(c) {
   const d = Y(new Date()), s = AT(d, c.startTime), e = AT(d, c.endTime);
-  return { signIn: [new Date(+s - 300000), e], signOut: [new Date(+e - cfg.outLeadMin * 60000), new Date(+e + cfg.outLagMin * 60000)] };
+  /* 签到：我们的默认是「上课前 5 分钟 ~ 下课」；
+     但一定要夹在服务端 signInClickRange 里，免得白打被拒。*/
+  const ci = RNG(c.signInClickRange) || [new Date(+s - 600000), e];
+  const co = RNG(c.signOutClickRange) || [new Date(+e - 300000), new Date(+e + 1200000)];
+  const lo = new Date(Math.max(+ci[0], +s - 300000));
+  const hi = new Date(Math.min(+ci[1], +e));
+  const olo = new Date(Math.max(+co[0], +e - cfg.outLeadMin * 60000));
+  const ohi = new Date(Math.min(+co[1], +e + cfg.outLagMin * 60000));
+  return { signIn: [lo, hi], signOut: [olo, ohi], click: { ci, co } };
 }
+/* 已签到判定：状态 1/2/3，或者已经有首次签到时间 */
+const signedIn = c => ['1', '2', '3'].indexOf(String(c.signInStatus)) >= 0 || !!c.firstSignInTime;
+const signedOut = c => String(c.signOutStatus) === '1' || !!c.signOutTime;
 const inW = (t, w) => t >= w[0] && t <= w[1];
 /* ---------- 主流程 ---------- */
 let busy = false, TN = 0;
@@ -158,6 +177,18 @@ function note(c, s, msg) {
   stt[k] = s;
   say(c.courseName + ' ' + msg);
 }
+/* 提交后回查服务端，确认真入账（不看 code 200 自嗨） */
+async function confirmSign(no, id) {
+  await SL(2500);
+  try {
+    const r = await api.schedule(Y(new Date()), no);
+    const c = ((r && r.data) || []).find(x => String(x.id) === String(id));
+    if (!c) { say('  确认：课表里没找到这门课'); return false; }
+    const ok = signedIn(c);
+    say('  确认 status=' + c.signInStatus + ' 首次=' + (c.firstSignInTime || '-') + (ok ? ' ✓ 已入账' : ' ✗ 服务端没记录'));
+    return ok;
+  } catch (e) { say('  确认失败 ' + clip((e && e.message) || e, 80), 'err'); return false; }
+}
 async function sign(force) {
   if (busy) return 0;
   busy = true;
@@ -171,7 +202,7 @@ async function sign(force) {
     let n = 0;
     for (const c of cs) {
       const sst = String(c.signInStatus);
-      if (!force && ['1', '2', '3', '4'].indexOf(sst) >= 0) { if (cfg.debug) note(c, 's' + sst, '已是 ' + sst + '(已签/待确认)，跳过'); continue; }
+      if (!force && signedIn(c)) { if (cfg.debug) note(c, 's' + sst, '已签到(status=' + sst + ' 首次=' + (c.firstSignInTime || '-') + ')，跳过'); continue; }
       const w = WIN(c), t = new Date();
       if (!force && !inW(t, w.signIn)) {
         if (cfg.debug) { const s = t < w.signIn[0] ? 'w' : 'e'; note(c, s, s === 'w' ? ('窗外，' + HM(w.signIn[0]) + ' 才开始，现在 ' + HM(t)) : '窗口已过'); }
@@ -198,7 +229,14 @@ async function sign(force) {
       try {
         const r = await api.doSign(pl);
         say('  doSign → ' + clip(J(r), 200));
-        if (String(r && r.code) === '200') { n++; mkDone(key); if (cfg.lowTrace || cfg.faceReport) await face(no, gps); say('✓ 签到成功 ' + c.courseName); SC.at = 0; }
+        if (String(r && r.code) === '200') {
+          n++; mkDone(key);
+          if (cfg.lowTrace || cfg.faceReport) await face(no, gps);
+          const cf = await confirmSign(no, c.id);
+          if (cf) say('✓ 签到成功 ' + c.courseName);
+          else { undDone(key); say('! 接口返回 200 但服务端没记录，下一轮重试 ' + c.courseName, 'err'); }
+          SC.at = 0;
+        }
         else say('× 签到失败 ' + clip(J(r), 160), 'err');
       } catch (e) { say('× 签到异常 ' + clip((e && (e.msg || e.message)) || e, 160), 'err'); }
       await SL(900 + Math.random() * 1800);
@@ -220,8 +258,10 @@ async function force() {
     const cs = (r0 && r0.data) || [];
     if (!cs.length) { say('今天没课'); return; }
     for (const c of cs) {
-      say('— ' + c.courseName + ' id=' + c.id + ' ' + c.startTime + '-' + c.endTime + ' status=' + c.signInStatus + ' ext=' + c.extendStatus);
-      if (String(c.signInStatus) === '1' || String(c.signInStatus) === '3') { say('  已签到，跳过'); continue; }
+      const w = WIN(c);
+      say('— ' + c.courseName + ' id=' + c.id + ' ' + c.startTime + '-' + c.endTime + ' status=' + c.signInStatus + ' 首次=' + (c.firstSignInTime || '-'));
+      say('  可点 ' + (c.signInClickRange || '-') + ' 我夹在 ' + HM(w.signIn[0]) + '~' + HM(w.signIn[1]) + ' 现在' + (inW(new Date(), w.signIn) ? '在窗内' : '窗外'));
+      if (signedIn(c)) { say('  已签到(首次=' + (c.firstSignInTime || String(c.signInStatus)) + ')，跳过'); continue; }
       let gps;
       try { gps = await pick(c); } catch (e) { say('  无坐标：' + e.message, 'err'); continue; }
       const ev = evl(c.roomGpsList, gps);
@@ -229,9 +269,18 @@ async function force() {
       const pl = { classDate: Y(new Date()), studentNo: no, paikeId: c.id, signType: sst === '2' ? '2' : '1', gps };
       if (ev.status !== '3') pl.signInStatus = '4';
       if (String(c.extendStatus) === '4') pl.signInStatus = '4';
+      say('  围栏判定 ' + ev.status + ' 距' + ev.distance.toFixed(0) + 'm ' + (pl.signInStatus ? '带 signInStatus=4' : '围栏内'));
       say('  POST doSign ' + J(pl));
-      try { const r = await api.doSign(pl); say('  RESP ' + J(r)); if (String(r && r.code) === '200') { mkDone(Y(new Date()) + '|' + c.id); say('  ✓ 成功'); SC.at = 0; } }
-      catch (e) { say('  × 异常 ' + clip((e && (e.msg || e.message)) || e, 160), 'err'); }
+      try {
+        const r = await api.doSign(pl);
+        say('  RESP ' + J(r));
+        if (String(r && r.code) === '200') {
+          mkDone(Y(new Date()) + '|' + c.id);
+          const cf = await confirmSign(no, c.id);
+          say(cf ? '  ✓ 成功且已入账' : '  ! 200 但服务端没记录', cf ? undefined : 'err');
+          SC.at = 0;
+        }
+      } catch (e) { say('  × 异常 ' + clip((e && (e.msg || e.message)) || e, 160), 'err'); }
       await SL(1200);
     }
     say('=== 强制签到结束 ===');
@@ -254,7 +303,9 @@ async function dump() {
   cs.forEach(c => {
     const w = WIN(c);
     say('· ' + c.courseName + ' status=' + c.signInStatus + ' ext=' + c.extendStatus + ' out=' + c.signOutStatus);
-    say('  ' + c.startTime + '-' + c.endTime + ' 窗口' + HM(w.signIn[0]) + '~' + HM(w.signIn[1]) + ' 现在' + (inW(d, w.signIn) ? '在窗内' : '窗外') + ' done=' + isDone(Y(d) + '|' + c.id));
+    say('  首次签=' + (c.firstSignInTime || '-') + ' 签退=' + (c.signOutTime || '-') + ' 已签=' + signedIn(c) + '/' + signedOut(c));
+    say('  上课 ' + c.startTime + '-' + c.endTime + ' 可点 ' + (c.signInClickRange || '-') + ' / ' + (c.signOutClickRange || '-'));
+    say('  我将签 ' + HM(w.signIn[0]) + '~' + HM(w.signIn[1]) + ' 现在' + (inW(d, w.signIn) ? '在窗内' : '窗外') + ' done=' + isDone(Y(d) + '|' + c.id));
   });
 }
 /* 日志导出：大字号只读框 + 复制 */
@@ -313,7 +364,7 @@ async function signout() {
     const no = await studentNo();
     const r0 = await sched();
     for (const c of ((r0 && r0.data) || [])) {
-      if (c.signOutTime || String(c.signOutStatus) === '1') continue;
+      if (signedOut(c)) continue;
       const w = WIN(c), t = new Date();
       if (!inW(t, w.signOut)) continue;
       const key = Y(t) + '|out|' + c.id;
@@ -387,7 +438,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   try {
     let last = '';
     try { const b = JSON.parse(localStorage.getItem(BF) || 'null'); if (b && b.at) last = '上次心跳 ' + ST(new Date(b.at)) + ' #' + b.n; } catch (e) {}
-    say('=== 1.4.6dbg 启动 ' + ST(new Date()) + ' ===');
+    say('=== 1.4.7dbg 启动 ' + ST(new Date()) + ' ===');
     if (last) say(last + '（说明刷新过/被杀过）');
     await waitMod(40);
     UI.refresh();
