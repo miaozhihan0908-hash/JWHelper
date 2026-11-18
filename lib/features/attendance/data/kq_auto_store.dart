@@ -174,18 +174,26 @@ class KqAutoStore {
 
   // ---------- 登录态 ----------
 
-  /// 由网页版页面在准备阶段调用：把当前账号的三个令牌和学号存下来。
+  /// 由网页版页面在准备阶段调用：把当前账号的令牌和学号存下来。
+  ///
+  /// **`jsessionId` 是必需的**：智慧考勤 `/unifast/**` 的认证靠的是 Tomcat
+  /// 的 `JSESSIONID`（cookie path 正好就是 `/unifast`），只带
+  /// `userToken/CTTICKET/APPCTTICKET` 会一律返回
+  /// 401「未找到授权信息，请重新登录！」。
+  /// 实测对照：不带 JSESSIONID → 401；带上 → 200 并拿到真实数据。
   static Future<void> saveAuth({
     required String userToken,
     required String ctTicket,
     required String appCtTicket,
     required String studentNo,
+    String jsessionId = '',
   }) async {
     if (userToken.isEmpty) return;
     final cookie = <String>[
       'userToken=$userToken',
       if (ctTicket.isNotEmpty) 'CTTICKET=$ctTicket',
       if (appCtTicket.isNotEmpty) 'APPCTTICKET=$appCtTicket',
+      if (jsessionId.isNotEmpty) 'JSESSIONID=$jsessionId',
     ].join('; ');
     final m = _readAll();
     m[_kCookie] = cookie;
