@@ -12,6 +12,7 @@ import 'package:JWHelper/app/navigation/app_navigator.dart';
 import 'package:JWHelper/app/presentation/home_screen.dart';
 import 'package:JWHelper/infrastructure/network/client.dart';
 import 'package:JWHelper/infrastructure/platform/widget_service.dart';
+import 'package:JWHelper/features/attendance/data/kq_auto_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,6 +21,13 @@ Future<void> main() async {
   SharedPreferences.getInstance();
   // WidgetService.init() runs in background, doesn't block app launch
   WidgetService.init();
+  // 后台签到：注册前台服务；若开关是开着的就自动续上（冷启动/开机后恢复）
+  Future<void>(() async {
+    try {
+      await kqInitAutoService();
+      await kqStartAutoServiceIfEnabled();
+    } catch (_) {}
+  });
   runApp(const MyApp());
 }
 

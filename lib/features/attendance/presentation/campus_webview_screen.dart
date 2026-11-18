@@ -7,6 +7,9 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:JWHelper/features/attendance/presentation/attendance_account_form.dart';
 import 'package:JWHelper/features/attendance/presentation/attendance_provider.dart';
 import 'package:JWHelper/features/attendance/presentation/attendance_web_actions.dart';
+import 'package:JWHelper/features/attendance/data/kq_auto_service.dart';
+import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
+import 'package:JWHelper/features/attendance/presentation/kq_auto_screen.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 /// 智慧考勤网页版（底部导航「考勤」tab 主体）。
@@ -189,6 +192,8 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
         appCtTicket: provider.appCtTicket,
       );
 
+      await _syncBackgroundAuth(provider, targetUri);
+
       final headers = <String, String>{
         if (_activeToken.isNotEmpty) 'Authorization': 'Bearer $_activeToken',
         if (_activeToken.isNotEmpty) 'X-User-Token': _activeToken,
@@ -306,8 +311,57 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
     }
   }
 
-  Future<void> _injectTokenToWebStorage() async {
-    if (_activeToken.isEmpty) {
+  /// 把登录态同步给后台签到引擎，并在开关打开时确保前台服务在跑。
+  ///
+  /// 后台 isolate 读不到这里的内存状态，所以令牌必须落盘一次；之后即使
+  /// 页面被销毁、App 退到后台，引擎也能自己发请求。
+  Future<void> _syncBackgroundAuth(
+    AttendanceProvider provider,
+    Uri targetUri,
+  ) async {
+    try {
+      await KqAutoStore.saveAuth(
+        userToken: provider.userToken,
+        ctTicket: provider.ctTicket,
+        appCtTicket: provider.appCtTicket,
+        studentNo: provider.savedUsername,
+      );
+      final config = await KqAutoStore.readConfig();
+      if (config.enabled) {
+        await kqStartAutoService();
+      }
+    } catch (_) {
+      // 同步失败不影响网页版本身。
+    }
+  }
+
+  /// 右下角小入口：打开后台签到控制台。刻意做小，避免遮挡网页内容。
+  Widget _buildAutoEntry() {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surface.withValues(alpha: 0.86),
+      shape: const CircleBorder(),
+      elevation: 3,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const KqAutoScreen()),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(9),
+          child: Icon(
+            Icons.alarm_on,
+            size: 19,
+            color: theme.colorScheme.primary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _injectTokenToWebStorage() async {    if (_activeToken.isEmpty) {
       return;
     }
     final escaped = _activeToken
@@ -370,6 +424,11 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
               WebViewWidget(controller: _controller!),
               if (_isPreparing || _isLoading)
                 const Center(child: CircularProgressIndicator()),
+              Positioned(
+                right: 10,
+                bottom: 12,
+                child: _buildAutoEntry(),
+              ),
             ],
           ),
         ),
