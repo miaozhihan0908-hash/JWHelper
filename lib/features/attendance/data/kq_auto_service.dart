@@ -1,10 +1,7 @@
 import 'dart:async';
-import 'dart:io' show Platform;
-import 'dart:ui';
 
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/kq_client.dart';
 import 'package:JWHelper/features/attendance/data/kq_signer.dart';
@@ -31,64 +28,20 @@ const Duration _scheduleTtl = Duration(minutes: 10);
 /// 两次签到尝试之间的最小间隔（避免窗口内每 20 秒打一次）。
 const Duration _attemptCooldown = Duration(minutes: 3);
 
-/// 把前台服务要用的通知通道真正建出来。
+/// 通知通道由**原生侧**创建：见 `MainActivity.ensureKqAutoChannel()`。
 ///
-/// 「一开后台守护就闪退」的真凶就在这里：`AndroidConfiguration` 指定的
-/// `notificationChannelId` 如果不存在，`startForeground()` 会拿着一个野
-/// channel 去发通知，系统判定
-/// `invalid channel for service notification`，进而抛
-/// `CannotPostForegroundServiceNotificationException`。这个异常抛在主线程，
-/// 进程当场死，Dart 侧 try/catch 完全兜不住——所以只能靠「先建通道」从源头
-/// 掐掉。flutter_background_service 不替我们建自定义通道，必须自己来。
+/// 曾经在这里用 flutter_local_notifications 建通道，但它必须先 `initialize()`，
+/// 而本项目是 adaptive icon、没有 PNG 版 `@mipmap/ic_launcher`，于是每轮都抛
+/// `PlatformException(invalid_icon)`，通道照样不存在——「一开后台守护就闪退」
+/// 就是这么来的：`startForeground()` 拿着一个野 channel 发通知，系统判
+/// `invalid channel for service notification`，抛
+/// `CannotPostForegroundServiceNotificationException` 把进程直接带走。
+/// 现在通道在 Activity.onCreate 里原生创建，不依赖任何插件与资源解析。
 ///
-/// 前台服务通知的通道重要性必须是 LOW（不能是 NONE），否则同样被判非法。
-Future<void> _ensureAutoNotificationChannel() async {
-  if (!Platform.isAndroid) return;
-  try {
-    final plugin = FlutterLocalNotificationsPlugin();
-    // v20 起 initialize 改成具名参数（settings:），旧的位置参数写法直接编译失败。
-    await plugin.initialize(
-      settings: const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      ),
-    );
-    final android = plugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >();
-    if (android == null) {
-      // 拿不到实例时过去是 `?.` 静默跳过，通道没建、也不报错，最后表现为
-      // 「一开守护就闪退」。现在至少留痕，并且真正兜底的是 MainActivity
-      // 里的原生 ensureKqAutoChannel()。
-      await KqAutoStore.appendLog('· Dart 侧无 Android 通知插件实例，通道由原生侧保证');
-      return;
-    }
-    await android.createNotificationChannel(
-      const AndroidNotificationChannel(
-        kqAutoChannelId,
-        '考勤守护',
-        description: '常驻通知栏，保证后台签到不被系统回收',
-        importance: Importance.low,
-        playSound: false,
-        enableVibration: false,
-        showBadge: false,
-      ),
-    );
-    await KqAutoStore.appendLog('· 通知通道 $kqAutoChannelId 已就绪');
-  } catch (e) {
-    // 建通道失败不掐断启动流程：让 startService 自己把错误报回来，
-    // 至少能落到启动标记里，而不是又一次静默闪退。
-    kqLastStartError = '通知通道创建失败：$e';
-    try {
-      await KqAutoStore.appendLog('× 通知通道创建失败：$e');
-    } catch (_) {}
-  }
-}
-
+/// 前台服务通知的通道重要性必须是 LOW（不能是 NONE），原生侧已按此设置。
+///
 /// 在 App 启动时调用一次即可（重复调用无副作用）。
 Future<void> kqInitAutoService() async {
-  // 必须在 configure/startService 之前：channel 不存在时 startForeground 必崩。
-  await _ensureAutoNotificationChannel();
   final service = FlutterBackgroundService();
   await service.configure(
     androidConfiguration: AndroidConfiguration(
@@ -213,8 +166,17 @@ void kqInvokeRunNow() => FlutterBackgroundService().invoke('runNow');
 
 @pragma('vm:entry-point')
 void kqAutoEntryPoint(ServiceInstance service) async {
-  // 后台 isolate 里插件要显式注册，否则 SharedPreferences 读不到。
-  DartPluginRegistrant.ensureInitialized();
+  // 这里**故意不调** `DartPluginRegistrant.ensureInitialized()`。
+  //
+  // 它是官方示例的标准写法，但在 flutter_background_service_android 6.1.0+
+  // 上会炸：后台 isolate 注册插件时，该包的 registerWith() 会构造
+  // FlutterBackgroundServiceAndroid，而它的 factory 里有守卫
+  //   if (!_isMainIsolate) throw Exception('...only be used in the main isolate...')
+  // 抛出的异常打断整个注册循环，排在它后面的插件全部没注册上，于是
+  // SharedPreferences 抛 MissingPluginException，tick() 第一句就死，
+  // 心跳永远不动、Timer.periodic 也挂不上——表现为"服务在跑但什么都不做"。
+  //
+  // 现在存储层是纯 dart:io 文件（kq_auto_store.dart），后台不需要任何插件。
 
   var running = false;
   var lastScheduleAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -300,8 +262,20 @@ void kqAutoEntryPoint(ServiceInstance service) async {
     await service.stopSelf();
   });
 
-  await tick();
-  Timer.periodic(const Duration(seconds: 20), (_) => tick());
+  // 首次 tick 必须吞掉异常：它一旦抛出，下面的 Timer.periodic 就永远不会
+  // 执行，后台从此一动不动（之前"心跳始终停在某个旧时间"就是这么来的）。
+  try {
+    await tick();
+  } catch (e) {
+    await KqAutoStore.appendLog('× 首次 tick 异常：$e');
+  }
+  Timer.periodic(const Duration(seconds: 20), (_) async {
+    try {
+      await tick();
+    } catch (e) {
+      await KqAutoStore.appendLog('× tick 异常：$e');
+    }
+  });
 }
 
 /// iOS 侧的回调签名要求返回 bool，这里只是转调同一个入口。
