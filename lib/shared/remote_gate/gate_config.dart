@@ -116,15 +116,18 @@ class GateState {
     'flags': flags.toJson(),
     'notice': notice.toJson(),
     'source': source,
-    'syncedAt': syncedAt?.millisecondsSinceEpoch,
-    'issuedAt': issuedAt?.millisecondsSinceEpoch,
-    'expiresAt': expiresAt?.millisecondsSinceEpoch,
+    // 统一按 UTC 存毫秒：本地时区改了也不影响一份缓存的含义。
+    'syncedAt': syncedAt?.toUtc().millisecondsSinceEpoch,
+    'issuedAt': issuedAt?.toUtc().millisecondsSinceEpoch,
+    'expiresAt': expiresAt?.toUtc().millisecondsSinceEpoch,
   };
 
   factory GateState.fromJson(Map<String, dynamic> m) {
     DateTime? at(String k) {
       final v = m[k];
-      return v is num ? DateTime.fromMillisecondsSinceEpoch(v.toInt()) : null;
+      return v is num
+          ? DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true)
+          : null;
     }
 
     return GateState(

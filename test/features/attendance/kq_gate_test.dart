@@ -62,7 +62,9 @@ void main() {
     expect(state, isNotNull);
     expect(state!.flags.killAll, isTrue);
     expect(state.flags.on('autoSign'), isFalse);
-    expect(state.flags.on('manualSign'), isTrue);
+    // 配置里手动签到本身是开的，但总闸拉着，所以对外一律是关。
+    expect(state.flags.features['manualSign'], isTrue);
+    expect(state.flags.on('manualSign'), isFalse);
     expect(state.notice.title, '这版已停用');
     expect(state.notice.body, '第一行\n第二行');
     expect(state.notice.confirm, '好吧');
