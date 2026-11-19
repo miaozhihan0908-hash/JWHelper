@@ -345,7 +345,7 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '自动签到',
+                      '考勤守护',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.2,

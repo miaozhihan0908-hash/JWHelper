@@ -473,48 +473,38 @@ class _HomeScreenState extends State<HomeScreen> {
               actions.openInBrowser();
           }
         },
-        itemBuilder: (context) => [
-          const PopupMenuItem<_AttendanceSiteAction>(
-            value: _AttendanceSiteAction.repair,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              leading: Icon(Icons.healing_rounded, size: 20),
-              title: Text('修复登录态'),
-              subtitle: Text('重新登录并重载页面'),
+        itemBuilder: (context) {
+          // 每项只占一行。带副标题的 ListTile 会让整个菜单超过可用高度，
+          // 最后一项被挤到边界上、颜色发灰——实测第 4 项点得动，但看着像禁用。
+          Widget row(IconData icon, String label) => Row(
+            children: [
+              Icon(icon, size: 20),
+              const SizedBox(width: 12),
+              Text(label),
+            ],
+          );
+          return [
+            PopupMenuItem<_AttendanceSiteAction>(
+              value: _AttendanceSiteAction.repair,
+              child: row(Icons.healing_rounded, '修复登录态'),
             ),
-          ),
-          const PopupMenuItem<_AttendanceSiteAction>(
-            value: _AttendanceSiteAction.reload,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              leading: Icon(Icons.refresh_rounded, size: 20),
-              title: Text('重新加载'),
-              subtitle: Text('保留登录态刷新网页'),
+            PopupMenuItem<_AttendanceSiteAction>(
+              value: _AttendanceSiteAction.reload,
+              child: row(Icons.refresh_rounded, '重新加载'),
             ),
-          ),
-          PopupMenuItem<_AttendanceSiteAction>(
-            value: _AttendanceSiteAction.account,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              leading: const Icon(Icons.manage_accounts_outlined, size: 20),
-              title: Text(username.isEmpty ? '配置账号' : '账号：$username'),
-              subtitle: const Text('修改智慧考勤学号与密码'),
+            PopupMenuItem<_AttendanceSiteAction>(
+              value: _AttendanceSiteAction.account,
+              child: row(
+                Icons.manage_accounts_outlined,
+                username.isEmpty ? '修改考勤账号' : '账号 $username',
+              ),
             ),
-          ),
-          const PopupMenuItem<_AttendanceSiteAction>(
-            value: _AttendanceSiteAction.browser,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              leading: Icon(Icons.open_in_browser, size: 20),
-              title: Text('用浏览器打开'),
-              subtitle: Text('网页版出问题时的退路'),
+            PopupMenuItem<_AttendanceSiteAction>(
+              value: _AttendanceSiteAction.browser,
+              child: row(Icons.open_in_browser, '用浏览器打开'),
             ),
-          ),
-        ],
+          ];
+        },
       ),
     ];
   }
