@@ -1,15 +1,15 @@
 {
   "apps": {
     "jwhelper": {
-      "killAll": false,
+      "killAll": true,
       "features": {
         "autoSign": true,
         "manualSign": true
       },
       "notice": {
-        "title": "自动签到已停用",
-        "body": "作者已在后台关闭这项功能。\n恢复后自动生效，不用更新版本。",
-        "confirm": "我知道了"
+        "title": "今天临时停机",
+        "body": "这台机器今天维护，签到先停一天。\n明早八点自动恢复，不用更新版本。",
+        "confirm": "知道了"
       },
       "licence": {
         "required": true,
@@ -31,7 +31,7 @@
     }
   },
   "v": 2,
-  "issuedAt": "2026-11-19T10:01:07Z",
-  "expiresAt": "2029-11-18T10:01:07Z",
-  "sig": "L3YHYqPPLFlDb5L5Hezwzn6z4SuPy4Yhnnn40Fjzn9pDbfW4ryPaqi8GyASkeaBOxfcXLzQwNE6BedivvQugAA=="
+  "issuedAt": "2026-11-19T10:14:16Z",
+  "expiresAt": "2029-11-18T10:14:16Z",
+  "sig": "XJ5CUyvF6jsCR2voGOhrc0ZCzmY26OB+DzD0jkqTrtW3XTyg08/UUtBSm0y+NXXmKv1NHMYbAUk0AU+/hwFcBg=="
 }
