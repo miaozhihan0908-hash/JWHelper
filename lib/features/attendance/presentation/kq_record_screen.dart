@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
-import 'package:JWHelper/features/attendance/data/kq_authz_probe.dart';
 import 'package:JWHelper/features/attendance/data/kq_record_tool.dart';
 
-/// 历史考勤记录：读名单、改结果、跑权限探测。
+/// 考勤记录：按日期读取课表与出勤明细。
 ///
-/// 所有写操作默认演练；只有点过确认框才会真发。
+/// **这里刻意没有任何"改动"入口**。那几个接口（考勤名单 / 考勤记录 /
+/// 改结果 / 代签到）都挂在教师端页面 `teacher/kqResult` 下，学生号调用
+/// 一律返回 `403 接口未授权！`——实测四条全被拦，连只读的都不给。
+/// 服务端是在网关按角色拦的，不在业务参数层，没有可以绕的缝。
+///
+/// 所以本页只做一件事：把服务端允许读到的东西读出来给人看。
+/// 给一个点了必然 403 的按钮，只会让用户以为是 App 坏了。
 class KqRecordScreen extends StatefulWidget {
   const KqRecordScreen({super.key});
 
@@ -17,10 +22,8 @@ class KqRecordScreen extends StatefulWidget {
 class _KqRecordScreenState extends State<KqRecordScreen> {
   DateTime _day = DateTime.now();
   bool _busy = false;
-  bool _dryRun = true;
   String _status = '';
   List<KqAttendanceRecord> _rows = const [];
-  List<KqProbeResult> _probes = const [];
   List<String> _notes = const [];
   String _cookie = '';
   String _studentNo = '';
@@ -93,303 +96,181 @@ class _KqRecordScreenState extends State<KqRecordScreen> {
     }
   }
 
-  Future<void> _runProbe() async {
-    final tool = _tool();
-    if (tool == null) return;
-    final paikeId = _rows.isNotEmpty
-        ? _rows.first.paikeId
-        : await _firstPaikeIdOfDay(tool);
-    if (paikeId.isEmpty) {
-      if (mounted) setState(() => _status = '这一天没有课，没法探测');
-      tool.close();
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _status = '探测中（全部只读）…';
-    });
-    try {
-      final probe = KqAuthzProbe(cookie: _cookie, studentNo: _studentNo);
-      final results = await probe.run(paikeId: paikeId);
-      probe.close();
-      if (!mounted) return;
-      setState(() {
-        _probes = results;
-        final open = results.where((r) => r.open).length;
-        _status = '探测完成：$open/${results.length} 条显示门是开的';
-      });
-    } catch (e) {
-      if (mounted) setState(() => _status = '探测失败：$e');
-    } finally {
-      tool.close();
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<String> _firstPaikeIdOfDay(KqRecordTool tool) async {
-    final courses = await tool.coursesOn(_day);
-    if (courses.isEmpty) return '';
-    return '${courses.first['id'] ?? ''}';
-  }
-
-  Future<void> _editRecord(KqAttendanceRecord record) async {
-    final chosen = <KqFlag>{};
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          title: const Text('改考勤结果'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(record.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(record.subtitle, style: Theme.of(ctx).textTheme.bodySmall),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                children: KqFlag.values.map((f) {
-                  final on = chosen.contains(f);
-                  return FilterChip(
-                    label: Text(f.label),
-                    selected: on,
-                    onSelected: (v) => setLocal(() {
-                      if (v) {
-                        chosen.add(f);
-                      } else {
-                        chosen.remove(f);
-                      }
-                    }),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'studentSignId=${record.signId}',
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: chosen.isEmpty ? null : () => Navigator.of(ctx).pop(true),
-              child: Text(_dryRun ? '演练一次' : '确认修改'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    final tool = _tool();
-    if (tool == null) return;
-    setState(() {
-      _busy = true;
-      _status = '提交中…';
-    });
-    try {
-      final result = await tool.applyResult(record, chosen, dryRun: _dryRun);
-      if (!mounted) return;
-      setState(() => _status = result.message);
-    } catch (e) {
-      if (mounted) setState(() => _status = '提交失败：$e');
-    } finally {
-      tool.close();
-      if (mounted) setState(() => _busy = false);
-    }
-    if (!_dryRun) await _loadRecords();
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('历史考勤记录'),
+        title: const Text('考勤记录'),
         actions: [
           IconButton(
             onPressed: _busy ? null : _pickDay,
-            icon: const Icon(Icons.event),
+            icon: const Icon(Icons.event_outlined),
             tooltip: '选择日期',
           ),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          Card(
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: theme.dividerColor),
+          Container(
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: scheme.outlineVariant.withValues(alpha: 0.5),
+              ),
             ),
             child: Column(
               children: [
                 ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.calendar_today, size: 20),
+                  leading: Icon(
+                    Icons.calendar_today_outlined,
+                    size: 20,
+                    color: scheme.primary,
+                  ),
                   title: Text(_d(_day)),
-                  subtitle: Text(_status.isEmpty ? '选日期后点「拉记录」' : _status),
+                  subtitle: Text(_status.isEmpty ? '选日期后读取' : _status),
+                  trailing: IconButton(
+                    onPressed: _busy ? null : _pickDay,
+                    icon: const Icon(Icons.chevron_right_rounded, size: 20),
+                    tooltip: '换一天',
+                  ),
                 ),
-                SwitchListTile(
-                  value: _dryRun,
-                  onChanged: (v) => setState(() => _dryRun = v),
-                  title: const Text('演练模式'),
-                  subtitle: Text(_dryRun ? '只打印 payload，不发请求' : '真提交：会改服务端记录'),
+                Divider(
+                  height: 1,
+                  indent: 16,
+                  color: scheme.outlineVariant.withValues(alpha: 0.4),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.tonalIcon(
+                          onPressed: _busy ? null : _loadRecords,
+                          icon: const Icon(Icons.download_rounded, size: 18),
+                          label: const Text('读取这一天'),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton.tonalIcon(
-                onPressed: _busy ? null : _loadRecords,
-                icon: const Icon(Icons.download, size: 18),
-                label: const Text('拉记录'),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: _busy ? null : _runProbe,
-                icon: const Icon(Icons.policy, size: 18),
-                label: const Text('权限探测'),
-              ),
-            ],
-          ),
           if (_notes.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Card(
-              elevation: 0,
-              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Text('拉取明细', style: TextStyle(fontWeight: FontWeight.bold)),
-                        const Spacer(),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () async {
-                            await showDialog<void>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('原始回话'),
-                                content: SingleChildScrollView(
-                                  child: SelectableText(
-                                    _notes.join('\n'),
-                                    style: const TextStyle(
-                                        fontFamily: 'monospace', fontSize: 11.5),
-                                  ),
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.of(ctx).pop(),
-                                    child: const Text('关闭'),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.copy_all, size: 18),
-                          tooltip: '可选中复制',
-                        ),
-                      ],
-                    ),
-                    ..._notes.map((n) => Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Text(
-                            n,
-                            style: const TextStyle(
-                                fontFamily: 'monospace', fontSize: 11, height: 1.4),
-                          ),
-                        )),
-                  ],
-                ),
-              ),
-            ),
+            const SizedBox(height: 14),
+            _notesCard(theme),
           ],
-          if (_probes.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Card(
-              elevation: 0,
-              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('探测矩阵', style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 6),
-                    ..._probes.map((p) => Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 3),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${p.verdict}  ${p.name}  HTTP=${p.http ?? '-'} code=${p.code.isEmpty ? '-' : p.code}',
-                                style: TextStyle(
-                                  fontFamily: 'monospace',
-                                  fontSize: 11.5,
-                                  color: p.open
-                                      ? theme.colorScheme.error
-                                      : theme.colorScheme.onSurface,
-                                ),
-                              ),
-                              if (p.msg.isNotEmpty)
-                                Text(
-                                  '    ${p.msg}',
-                                  style: const TextStyle(
-                                      fontFamily: 'monospace', fontSize: 11),
-                                ),
-                            ],
-                          ),
-                        )),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           if (_rows.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
+              padding: const EdgeInsets.symmetric(vertical: 20),
               child: Text(
-                '还没有记录。点「拉记录」按日期读取。',
+                '没有记录。',
                 textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             )
           else
-            ..._rows.map((r) => Card(
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    side: BorderSide(color: theme.dividerColor),
+            ..._rows.map(
+              (r) => Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: scheme.outlineVariant.withValues(alpha: 0.5),
                   ),
-                  child: ListTile(
-                    dense: true,
-                    title: Text(r.title),
-                    subtitle: Text(r.subtitle),
-                    trailing: TextButton(
-                      onPressed: _busy || !r.hasSignId ? null : () => _editRecord(r),
-                      child: const Text('改'),
-                    ),
-                  ),
-                )),
-          const SizedBox(height: 16),
+                ),
+                child: ListTile(
+                  dense: true,
+                  title: Text(r.title),
+                  subtitle: Text(r.subtitle),
+                ),
+              ),
+            ),
+          const SizedBox(height: 12),
           Text(
-            '改历史记录比签到留的痕重：服务端多半有操作日志（谁、何时、改了什么）。'
-            '探测里的写请求全部用不存在的 id，不会改动任何记录。',
-            style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
+            '说明：出勤明细属于教师端口径的接口，学生号调用会被服务端按角色拒绝'
+            '（403 接口未授权）。这里只做读取尝试，不会、也无法修改任何记录。',
+            style: theme.textTheme.bodySmall?.copyWith(
+              height: 1.6,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _notesCard(ThemeData theme) {
+    final scheme = theme.colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                '读取明细',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                onPressed: () async {
+                  await showDialog<void>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('原始回话'),
+                      content: SingleChildScrollView(
+                        child: SelectableText(
+                          _notes.join('\n'),
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          child: const Text('关闭'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.copy_all_rounded, size: 18),
+                tooltip: '可选中复制',
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          ..._notes.map(
+            (n) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Text(
+                n,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  height: 1.45,
+                ),
+              ),
+            ),
           ),
         ],
       ),
