@@ -772,7 +772,9 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
             ),
             const Spacer(),
             TextButton.icon(
-              onPressed: (_busy || _manualBlock != null) ? null : _selfTest,
+              // 自检只读课表、不发任何请求，不受授权影响：
+              // 到期的人还能用它确认「到底是没授权还是登录态坏了」。
+              onPressed: _busy ? null : _selfTest,
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 minimumSize: const Size(0, 32),
