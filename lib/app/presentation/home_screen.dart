@@ -20,6 +20,7 @@ import 'package:JWHelper/features/attendance/presentation/attendance_screen.dart
 import 'package:JWHelper/features/attendance/presentation/attendance_account_form.dart';
 import 'package:JWHelper/features/attendance/presentation/attendance_provider.dart';
 import 'package:JWHelper/features/attendance/presentation/attendance_web_actions.dart';
+import 'package:JWHelper/features/attendance/presentation/kq_help_screen.dart';
 import 'package:JWHelper/features/auth/presentation/login_screen.dart';
 import 'package:JWHelper/app/coordinators/logout_coordinator.dart';
 import 'package:JWHelper/app/coordinators/home_navigation_coordinator.dart';
@@ -564,6 +565,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// 打开使用说明。内容按平台分成 Android / iOS 两份，见 KqHelpScreen。
+  void _openHelp() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const KqHelpScreen()));
+  }
+
   void _showSettingsDialog() {
     // 提前载入考勤账号，避免设置里把已绑定的账号显示成「未配置」。
     context.read<AttendanceProvider>().ensureLoaded();
@@ -957,6 +965,38 @@ class _HomeScreenState extends State<HomeScreen> {
                             },
                           ),
                         ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 24),
+                    Card(
+                      elevation: 0,
+                      margin: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(
+                          color: Colors.grey.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      child: ListTile(
+                        leading: Icon(
+                          Icons.menu_book_outlined,
+                          color: primaryColor,
+                        ),
+                        title: const Text("使用说明"),
+                        subtitle: Text(
+                          KqHelpScreen.subtitle,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        trailing: const Icon(
+                          Icons.chevron_right,
+                          size: 16,
+                          color: Colors.grey,
+                        ),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _openHelp();
+                        },
                       ),
                     ),
 
