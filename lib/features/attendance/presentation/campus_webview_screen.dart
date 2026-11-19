@@ -54,6 +54,13 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
 
   /// 自动签到被远程停用了。胶囊要能直接显示这件事，不用点进去才知道。
   bool _gateLocked = false;
+
+  /// 上一次为胶囊回源的时间。
+  ///
+  /// 页面开着时每 60 秒拉一次，比后台那条 5 分钟的上限快得多；又不至于每
+  /// 15 秒一轮把 GitHub API 的匿名额度（60 次/小时）烧掉。
+  DateTime _gatePollAt = DateTime.fromMillisecondsSinceEpoch(0);
+
   Timer? _autoPoller;
 
   @override
@@ -112,8 +119,11 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
   Future<void> _pollAutoState() async {
     try {
       await KqGate.load();
-      // 停在考勤页时也跟一下远程状态：胶囊最迟 5 分钟反映一次停用/恢复。
-      KqGate.refreshIfStale();
+      // 停在考勤页时也跟一下远程状态：最迟 60 秒，胶囊就会反映停用/恢复。
+      if (DateTime.now().difference(_gatePollAt) >= const Duration(seconds: 60)) {
+        _gatePollAt = DateTime.now();
+        await KqGate.refreshQuick();
+      }
       final config = await KqAutoStore.readConfig();
       final studentNo = await KqAutoStore.readStudentNo();
       final locked = KqGate.autoBlocker(studentNo) != null;
