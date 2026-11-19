@@ -325,14 +325,21 @@ class KqAutoStore {
     _put(_kLastBeat, '${DateTime.now().millisecondsSinceEpoch}|$note');
   }
 
-  static Future<String> readBeat() async {
+  /// 心跳的原始时间点。界面靠它判断服务是不是真的活着（而不是只看开关）。
+  static Future<DateTime?> readBeatAt() async {
     final v = _readAll()[_kLastBeat];
     final raw = v is String ? v : '';
-    if (raw.isEmpty) return '';
-    final parts = raw.split('|');
-    final ms = int.tryParse(parts.first) ?? 0;
-    if (ms <= 0) return '';
-    final at = DateTime.fromMillisecondsSinceEpoch(ms);
+    if (raw.isEmpty) return null;
+    final ms = int.tryParse(raw.split('|').first) ?? 0;
+    if (ms <= 0) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  static Future<String> readBeat() async {
+    final at = await readBeatAt();
+    if (at == null) return '';
+    final v = _readAll()[_kLastBeat];
+    final parts = (v is String ? v : '').split('|');
     String two(int n) => n.toString().padLeft(2, '0');
     return '${two(at.hour)}:${two(at.minute)}:${two(at.second)} '
         '${parts.length > 1 ? parts[1] : ''}';
