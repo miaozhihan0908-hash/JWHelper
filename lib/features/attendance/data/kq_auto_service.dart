@@ -257,21 +257,30 @@ void kqAutoEntryPoint(ServiceInstance service) async {
         return;
       }
 
-      // 第二道闸：每一轮都重判。
-      // 服务可能是上一版留下的，开关也可能是刚在后台被关掉的——只在启动时
-      // 看一眼不够，那要等到下次冷启动才生效。
+      // 课表按 TTL 刷新；刷新后判断现在是否接近上课。
+      if (force || DateTime.now().difference(lastScheduleAt) > _scheduleTtl) {
+        await refreshCourses(cookie, studentNo);
+      }
+      final near = force || nearAny(cachedCourses, now);
+
+      // 第二道闸：每一轮都重判，而且**先回源再判**。
+      //
+      // 平时 5 分钟拉一次；临近上课就每轮都拉（10 秒节流）——那时候才真的
+      // 可能签上，被停用必须马上落地。只在启动时看一眼不够：服务可能是上一版
+      // 留下的，开关也可能是刚在后台被关掉的。
       await KqGate.load();
+      if (near) {
+        await KqGate.refresh(force: true);
+      } else {
+        KqGate.refreshIfStale();
+      }
       final blocked = KqGate.autoBlocker(studentNo);
       if (blocked != null) {
         await _logGateOnce('× 自动签到已被停用：$blocked');
         return;
       }
 
-      // 课表按 TTL 刷新；刷新后判断现在是否接近上课。
-      if (force || DateTime.now().difference(lastScheduleAt) > _scheduleTtl) {
-        await refreshCourses(cookie, studentNo);
-      }
-      if (!force && !nearAny(cachedCourses, now)) return;
+      if (!force && !near) return;
       if (!force && now.isBefore(nextAttemptAt)) return;
 
       nextAttemptAt = DateTime.now().add(_attemptCooldown);
@@ -280,6 +289,9 @@ void kqAutoEntryPoint(ServiceInstance service) async {
         studentNo: studentNo,
         commit: cfg.commit,
         jitterSigma: cfg.jitterSigma,
+        // 后台这条归「自动签到」管；上面判过一次，这里再判一次，防止
+        // 判完到下笔之间开关被关掉。
+        gateFeature: KqGate.featureAutoSign,
       );
       try {
         final n = await signer.runOnce(force: force);

@@ -112,6 +112,8 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
   Future<void> _pollAutoState() async {
     try {
       await KqGate.load();
+      // 停在考勤页时也跟一下远程状态：胶囊最迟 5 分钟反映一次停用/恢复。
+      KqGate.refreshIfStale();
       final config = await KqAutoStore.readConfig();
       final studentNo = await KqAutoStore.readStudentNo();
       final locked = KqGate.autoBlocker(studentNo) != null;

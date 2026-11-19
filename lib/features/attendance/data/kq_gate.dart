@@ -34,9 +34,12 @@ class KqGate {
     mirrors: mirrors,
     readCache: KqAutoStore.readGateCache,
     writeCache: KqAutoStore.saveGateCache,
-    // 进页面就要看得见新文案，所以界面这条路的节流只有一分钟；
-    // 后台那条仍然走 ttl（6 小时），免得费电。
-    minGap: const Duration(minutes: 1),
+    // 生效速度优先：
+    //   ttl    = 5 分钟 —— 后台服务最迟 5 分钟就知道自己被停用了；
+    //   minGap = 10 秒  —— 进页面、临近上课时的强制回源几乎即时。
+    // 配置文件只有 600 字节，一天轮询几百次也就几 MB，比一次网页加载还轻。
+    ttl: const Duration(minutes: 5),
+    minGap: const Duration(seconds: 10),
   );
 
   static final GateController controller = GateController(
@@ -65,10 +68,10 @@ class KqGate {
   static Future<GateState> refresh({bool force = false}) =>
       controller.refresh(force: force);
 
-  /// 后台用：隔 6 小时才回源。
+  /// 后台用：隔 5 分钟才回源（比默认的 6 小时短得多，停用才来得及）。
   static void refreshIfStale() => controller.refreshIfStale();
 
-  /// 界面用：进页面时调一次，隔一分钟才回源。
+  /// 界面用：进页面时调一次，隔 10 秒才回源。
   static void touch() => controller.refreshSoon();
 
   /// 界面用：等一次回源，最多等 [cap]，拿不到就用缓存里的。
