@@ -609,7 +609,8 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _notice.title,
+                  // 缺授权码的时候别用"已停用"那句，免得用户以为是被作者关了。
+                  _licenceMissing ? '需要授权码' : _notice.title,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w700,
                     color: scheme.error,
