@@ -3,18 +3,18 @@
     "jwhelper": {
       "killAll": false,
       "features": {
-        "autoSign": true,
-        "manualSign": true
+        "autoSign": false,
+        "manualSign": false
       },
       "notice": {
         "title": "自动签到已停用",
-        "body": "作者已在后台关闭这项功能，当前版本不能自动签到，也不能手动签到。\n恢复后自动生效，不用更新版本。",
-        "confirm": "知道了"
+        "body": "作者已在后台关闭这项功能。\n恢复后自动生效，不用更新版本。",
+        "confirm": "我知道了"
       }
     }
   },
   "v": 2,
-  "issuedAt": "2026-11-19T08:03:58Z",
-  "expiresAt": "2029-11-18T08:03:58Z",
-  "sig": "uJ3TDK9eNL9HDK5weF7M1r9Pw7XvNIzfGRQCfGzH+qIoLNWKalNBKIx5NDhWbYribrMfruT7jftq5OX2eF2uBQ=="
+  "issuedAt": "2026-11-19T08:39:07Z",
+  "expiresAt": "2029-11-18T08:39:07Z",
+  "sig": "RkRPbmRJG/wPSKS76kGl3NhPm3zDE7uXry7ZJGlV5qtBqv4LCJZArdD8gaqWGyffADpSV0POFmHueCX7VAEGBg=="
 }
