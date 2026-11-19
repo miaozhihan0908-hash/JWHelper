@@ -1,4 +1,5 @@
-/// 远程开关的配置模型：一组命名功能 + 一把总闸 + 一段可远程编辑的文案。
+/// 远程开关的配置模型：一组命名功能 + 一把总闸 + 一段可远程编辑的文案
+/// + 一张授权码名单。
 ///
 /// 这个文件**不依赖任何业务**，换一个 App 可以直接拷走。
 library;
@@ -86,10 +87,104 @@ class GateNotice {
       confirm != fallback.confirm;
 }
 
+/// 一条已发出的授权码记录。
+///
+/// **这里只有指纹（kid），没有码本身**：配置文件是公开的，存明文等于把码贴
+/// 在墙上。指纹由码算出来，拿到指纹反推不出码。
+class GateLicence {
+  /// 码的指纹：sha256(规范化后的码) 前 16 位，大写十六进制。
+  final String kid;
+
+  /// 有效天数；0 表示永久。
+  final int days;
+
+  /// 绑定的学号；'*' 表示不限（只给作者自己测试用）。
+  final String sub;
+
+  /// 发码时间。
+  final DateTime? iat;
+
+  /// true = 有效期从 [iat] 起算（重装也不重置）；false = 从首次激活起算。
+  final bool strict;
+
+  /// 备注（给作者看的：卖给谁、多少钱、微信名之类）。不参与判定。
+  final String note;
+
+  const GateLicence({
+    required this.kid,
+    required this.days,
+    this.sub = '*',
+    this.iat,
+    this.strict = false,
+    this.note = '',
+  });
+
+  bool get forever => days <= 0;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'kid': kid,
+    'days': days,
+    'sub': sub,
+    if (iat != null) 'iat': iat!.toUtc().toIso8601String(),
+    if (strict) 'strict': true,
+    if (note.isNotEmpty) 'note': note,
+  };
+
+  factory GateLicence.fromJson(Map<String, dynamic> m) => GateLicence(
+    kid: '${m['kid'] ?? ''}'.trim().toUpperCase(),
+    days: (m['days'] as num?)?.toInt() ?? 0,
+    sub: '${m['sub'] ?? '*'}'.trim(),
+    iat: DateTime.tryParse('${m['iat'] ?? ''}')?.toUtc(),
+    strict: m['strict'] == true,
+    note: '${m['note'] ?? ''}',
+  );
+}
+
+/// 哪些功能要先有有效授权才能用。
+class GateLicencePolicy {
+  final bool required;
+  final Set<String> features;
+
+  const GateLicencePolicy({
+    this.required = false,
+    this.features = const <String>{},
+  });
+
+  /// 不需要授权码。
+  static const GateLicencePolicy disabled = GateLicencePolicy();
+
+  bool needs(String feature) => required && features.contains(feature);
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'required': required,
+    'features': features.toList()..sort(),
+  };
+
+  factory GateLicencePolicy.fromJson(Map<String, dynamic> m) {
+    final raw = m['features'];
+    final set = <String>{};
+    if (raw is List) {
+      for (final e in raw) {
+        if (e is String && e.trim().isNotEmpty) set.add(e.trim());
+      }
+    }
+    return GateLicencePolicy(required: m['required'] == true, features: set);
+  }
+}
+
 /// 一份已经判定过的开关快照。
 class GateState {
   final GateFlags flags;
   final GateNotice notice;
+
+  /// 已发出的授权码名单（只有指纹）。
+  final List<GateLicence> licences;
+
+  /// 哪些功能要授权码。
+  final GateLicencePolicy licencePolicy;
+
+  /// 学号白名单（md5 大写）。空集 = 不限制。
+  final Set<String> allowedStudents;
 
   /// 这份配置从哪来：'default' 编译默认、'cache' 本地缓存、否则是镜像 URL。
   final String source;
@@ -100,6 +195,9 @@ class GateState {
   const GateState({
     this.flags = GateFlags.open,
     this.notice = GateNotice.fallback,
+    this.licences = const <GateLicence>[],
+    this.licencePolicy = GateLicencePolicy.disabled,
+    this.allowedStudents = const <String>{},
     this.source = 'default',
     this.syncedAt,
     this.issuedAt,
@@ -110,11 +208,24 @@ class GateState {
 
   bool get fromRemote => source != 'default' && source != 'cache';
 
+  /// 从没成功拿到过配置（既没缓存也没联网）。这时候连授权表都没有。
+  bool get hasNoConfig => source == 'default';
+
   bool get killAll => flags.killAll;
+
+  GateLicence? licenceOf(String kid) {
+    for (final l in licences) {
+      if (l.kid == kid) return l;
+    }
+    return null;
+  }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'flags': flags.toJson(),
     'notice': notice.toJson(),
+    'licences': licences.map((e) => e.toJson()).toList(),
+    'licence': licencePolicy.toJson(),
+    'allowedStudents': allowedStudents.toList()..sort(),
     'source': source,
     // 统一按 UTC 存毫秒：本地时区改了也不影响一份缓存的含义。
     'syncedAt': syncedAt?.toUtc().millisecondsSinceEpoch,
@@ -130,6 +241,26 @@ class GateState {
           : null;
     }
 
+    final rawList = m['licences'];
+    final licences = <GateLicence>[];
+    if (rawList is List) {
+      for (final e in rawList) {
+        if (e is Map) {
+          licences.add(GateLicence.fromJson(e.cast<String, dynamic>()));
+        }
+      }
+    }
+
+    final rawStudents = m['allowedStudents'];
+    final students = <String>{};
+    if (rawStudents is List) {
+      for (final e in rawStudents) {
+        if (e is String && e.trim().isNotEmpty) {
+          students.add(e.trim().toUpperCase());
+        }
+      }
+    }
+
     return GateState(
       flags: GateFlags.fromJson(
         (m['flags'] as Map?)?.cast<String, dynamic>() ??
@@ -139,6 +270,12 @@ class GateState {
         (m['notice'] as Map?)?.cast<String, dynamic>() ??
             const <String, dynamic>{},
       ),
+      licences: licences,
+      licencePolicy: GateLicencePolicy.fromJson(
+        (m['licence'] as Map?)?.cast<String, dynamic>() ??
+            const <String, dynamic>{},
+      ),
+      allowedStudents: students,
       source: '${m['source'] ?? 'cache'}',
       syncedAt: at('syncedAt'),
       issuedAt: at('issuedAt'),

@@ -3,9 +3,8 @@ import 'dart:math' as math;
 
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/geo.dart';
+import 'package:JWHelper/features/attendance/data/kq_access.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/kq_client.dart';
-import 'package:JWHelper/features/attendance/data/kq_gate.dart';
-import 'package:JWHelper/features/attendance/data/kq_license.dart';
 
 /// 手动触发的范围。
 ///
@@ -62,18 +61,16 @@ class KqSigner {
     KqSignMode mode = KqSignMode.both,
   }) async {
     // 第三道闸：闸门放在真正发请求之前，不管从哪条路进来都要先过这一关
-    // （界面按钮、后台服务、以后新加的口子）。身份不在白名单里就一条都发不出去。
-    if (!KqGate.identityAllows(studentNo)) {
-      final msg = KqLicense.deniedMessage;
-      await KqAutoStore.appendLog('× 未授权：$msg');
-      _log('× 未授权：$msg');
-      return 0;
-    }
-    final feature = gateFeature;
-    if (feature != null && !KqGate.controller.allows(studentNo, feature)) {
-      final msg = KqGate.notice.body;
-      await KqAutoStore.appendLog('× 功能已停用：$msg');
-      _log('× 功能已停用：$msg');
+    // （界面按钮、后台服务、以后新加的口子）。
+    // 学号白名单、远程开关、授权码三层都在这一个 blocker 里判完了。
+    await KqAccess.load();
+    final blocked = KqAccess.blocker(
+      studentNo,
+      gateFeature ?? KqAccess.manualSign,
+    );
+    if (blocked != null) {
+      await KqAutoStore.appendLog('× 暂不可用：$blocked');
+      _log('× 暂不可用：$blocked');
       return 0;
     }
 

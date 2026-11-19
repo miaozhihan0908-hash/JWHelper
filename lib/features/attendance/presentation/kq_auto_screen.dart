@@ -4,7 +4,10 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'package:JWHelper/features/attendance/data/kq_auto_service.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
+import 'package:JWHelper/features/attendance/data/kq_access.dart';
 import 'package:JWHelper/features/attendance/data/kq_gate.dart';
+import 'package:JWHelper/features/attendance/data/kq_licence.dart';
+import 'package:JWHelper/features/attendance/presentation/kq_licence_screen.dart';
 import 'package:JWHelper/features/attendance/data/kq_signer.dart';
 import 'package:JWHelper/shared/remote_gate/remote_gate.dart';
 
@@ -33,9 +36,19 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
   DateTime? _beatAt;
   List<String> _log = const <String>[];
 
-  /// 被远程开关挡住的原因；null 表示这个功能现在能用。
+  /// 被挡住的原因（远程开关或授权码）；null 表示这个功能现在能用。
   String? _autoBlock;
   String? _manualBlock;
+  String? _forceBlock;
+
+  /// 挡住它的原因是"缺授权码"而不是"被停用"——界面据此给「输入授权码」按钮。
+  bool _licenceMissing = false;
+
+  /// 本机授权状态的一行说明（剩余 7 天 / 永久 / 已过期…）。
+  String _licenceLabel = '';
+
+  /// 当前登录学号，进授权页要用。
+  String _studentNo = '';
 
   /// 停用时给用户看的那段话（来自远程配置，作者随时能改）。
   GateNotice _notice = GateNotice.fallback;
@@ -48,8 +61,9 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
 
   Future<void> _reload() async {
     // 先读本地缓存，再把回源顶多等两秒：网络差也不至于让整页卡住。
-    await KqGate.load();
+    await KqAccess.load();
     await KqGate.refreshQuick();
+    await KqLicence.touch();
 
     var config = await KqAutoStore.readConfig();
     var running = await kqIsAutoServiceRunning();
@@ -58,9 +72,10 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
     final studentNo = await KqAutoStore.readStudentNo();
     final beatAt = await KqAutoStore.readBeatAt();
     final log = await KqAutoStore.readLog();
+    final autoBlock = KqAccess.blocker(studentNo, KqAccess.autoSign);
 
-    // 被远程停用、而服务还在跑：真的停掉它，不是只把开关变灰就完事。
-    if (running && KqGate.autoBlocker(studentNo) != null) {
+    // 被远程停用 / 授权失效、而服务还在跑：真的停掉它，不是只把开关变灰就完事。
+    if (running && autoBlock != null) {
       await kqStopAutoService();
       if (config.enabled) {
         config = config.copyWith(enabled: false);
@@ -76,8 +91,15 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
       _config = config;
       _serviceRunning = running;
       _notice = KqGate.notice;
-      _autoBlock = KqGate.autoBlocker(studentNo);
-      _manualBlock = KqGate.manualBlocker(studentNo);
+      _studentNo = studentNo;
+      _autoBlock = autoBlock;
+      _manualBlock = KqAccess.blocker(studentNo, KqAccess.manualSign);
+      _forceBlock = KqAccess.blocker(studentNo, KqAccess.forceSign);
+      _licenceMissing =
+          KqAccess.missingLicence(studentNo, KqAccess.autoSign) ||
+          KqAccess.missingLicence(studentNo, KqAccess.manualSign) ||
+          KqAccess.missingLicence(studentNo, KqAccess.forceSign);
+      _licenceLabel = KqAccess.licence(studentNo).label;
       _beatAt = beatAt;
       _authText = cookie.isEmpty
           ? '未就绪'
@@ -213,7 +235,9 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
     bool force = false,
   }) async {
     if (_busy) return;
-    final blocked = _manualBlock;
+    // 强制签到归「强制」那一档，普通签到签退归「手动」那一档。
+    final feature = force ? KqAccess.forceSign : KqAccess.manualSign;
+    final blocked = force ? _forceBlock : _manualBlock;
     if (blocked != null) {
       await _toast(blocked);
       return;
@@ -231,8 +255,8 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
         studentNo: studentNo,
         commit: _config.commit,
         jitterSigma: _config.jitterSigma,
-        // 这是手动那条路，归「手动签到」这个开关管。
-        gateFeature: KqGate.featureManualSign,
+        // 强制走 forceSign 那一档（默认要授权码），普通签到签退走 manualSign。
+        gateFeature: feature,
       );
       try {
         final n = await signer.runOnce(mode: mode, force: force);
@@ -398,7 +422,10 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          if (_autoBlock != null || _manualBlock != null) _gateBanner(theme),
+          if (_autoBlock != null ||
+              _forceBlock != null ||
+              _manualBlock != null)
+            _gateBanner(theme),
           _statusCard(theme),
           const SizedBox(height: 14),
           _manualActions(theme),
@@ -563,7 +590,7 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
   /// 被远程开关挡住时的横幅：说清是谁停的，点一下能看全文。
   Widget _gateBanner(ThemeData theme) {
     final scheme = theme.colorScheme;
-    final reason = _autoBlock ?? _manualBlock!;
+    final reason = _autoBlock ?? _forceBlock ?? _manualBlock!;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
@@ -602,17 +629,27 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
             ),
           ),
           TextButton(
-            onPressed: _showGateDetail,
+            onPressed: _licenceMissing ? _openLicence : _showGateDetail,
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               minimumSize: const Size(0, 32),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            child: Text(_notice.confirm),
+            child: Text(_licenceMissing ? '输入授权码' : _notice.confirm),
           ),
         ],
       ),
     );
+  }
+
+  /// 打开授权页；回来后立刻对齐状态（用户可能刚激活成功）。
+  Future<void> _openLicence() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => KqLicenceScreen(studentNo: _studentNo),
+      ),
+    );
+    await _reload();
   }
 
   /// 完整文案：正文可能有几行，横幅里放不下。
@@ -632,12 +669,13 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
     );
   }
 
-  /// 远程状态：开关来自哪个镜像、什么时候同步的、现在是什么值。
+  /// 远程状态：开关来自哪个镜像、授权到哪天、现在是什么值。
   Future<void> _showGateStatus() async {
     setState(() => _busy = true);
     try {
       await KqGate.refreshQuick();
-      final text = KqGate.describe();
+      await KqLicence.touch();
+      final text = KqAccess.describe(await KqAutoStore.readStudentNo());
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -780,7 +818,7 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: OutlinedButton.icon(
-                onPressed: (_busy || _manualBlock != null) ? null : _forceSign,
+                onPressed: (_busy || _forceBlock != null) ? null : _forceSign,
                 style: OutlinedButton.styleFrom(
                   minimumSize: const Size(0, 46),
                   shape: radius,
@@ -940,7 +978,7 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
           _actionTile(
             theme,
             icon: Icons.cloud_sync_outlined,
-            title: '远程状态',
+            title: '远程状态 / 授权',
             subtitle: '开关来自哪、什么时候同步的、现在是什么值',
             onTap: _showGateStatus,
           ),
@@ -950,6 +988,13 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
             title: '服务诊断',
             subtitle: '看前台服务、启动标记、心跳和日志行数',
             onTap: _busy ? null : _diagnose,
+          ),
+          _actionTile(
+            theme,
+            icon: Icons.vpn_key_outlined,
+            title: '授权码',
+            subtitle: _licenceLabel.isEmpty ? '查看与输入授权码' : '当前：$_licenceLabel',
+            onTap: _busy ? null : _openLicence,
           ),
           _actionTile(
             theme,

@@ -39,6 +39,10 @@ on:
         description: "这份配置的有效期天数，默认 1095"
         required: false
         default: "1095"
+      revoke_kid:
+        description: "作废一个授权码：填 16 位指纹（发码时显示，也可用 --list 查）。明文码不要填进来"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -75,6 +79,7 @@ jobs:
           N_BODY: ${{ inputs.notice_body }}
           N_CONFIRM: ${{ inputs.notice_confirm }}
           GATE_EXPIRES_DAYS: ${{ inputs.expires_days }}
+          REVOKE_KID: ${{ inputs.revoke_kid }}
         run: |
           if [ -z "$GATE_PRIVATE_KEY" ]; then
             echo "::error::仓库还没有配置 GATE_PRIVATE_KEY 这个 secret"
@@ -87,6 +92,11 @@ jobs:
             --notice-title "$N_TITLE" \
             --notice-body "$N_BODY" \
             --notice-confirm "$N_CONFIRM"
+
+          # 作废某个码：只传 16 位指纹。明文码永远不出现在公开的日志里。
+          if [ -n "$REVOKE_KID" ]; then
+            python issue_key.py --revoke "$REVOKE_KID"
+          fi
 
       - name: Commit
         run: |

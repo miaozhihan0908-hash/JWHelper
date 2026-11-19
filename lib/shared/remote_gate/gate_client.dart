@@ -39,6 +39,7 @@ class GateClient {
     this.connectTimeout = const Duration(seconds: 3),
     this.timeout = const Duration(seconds: 8),
     this.clockSkew = const Duration(hours: 6),
+    this.defaultLicencePolicy = GateLicencePolicy.disabled,
   }) : _publicKey = hexToBytes(publicKeyHex);
 
   /// 在配置里认领哪一节：`apps.<appId>`。
@@ -69,6 +70,12 @@ class GateClient {
 
   /// 容忍的时钟偏差：签发的 `issuedAt` 比本机时间晚这么多以内仍接受。
   final Duration clockSkew;
+
+  /// 配置里没写 `licence` 时用哪套策略。
+  ///
+  /// 宿主 App 传 `required: true` 就得到 fail-closed 行为：连不上配置、也没有
+  /// 缓存时，需要授权的功能一律不可用，而不是悄悄放开。
+  final GateLicencePolicy defaultLicencePolicy;
 
   final Uint8List _publicKey;
 
@@ -225,6 +232,33 @@ class GateClient {
       final section = _sectionOf(map);
       if (section == null) return null;
 
+      final rawLicences = section['licences'];
+      final licences = <GateLicence>[];
+      if (rawLicences is List) {
+        for (final e in rawLicences) {
+          if (e is Map) {
+            final rec = GateLicence.fromJson(e.cast<String, dynamic>());
+            // 没有指纹的记录是废数据，直接跳过，别让它参与判定。
+            if (rec.kid.isNotEmpty) licences.add(rec);
+          }
+        }
+      }
+
+      final rawStudents = section['allowedStudents'];
+      final students = <String>{};
+      if (rawStudents is List) {
+        for (final e in rawStudents) {
+          if (e is String && e.trim().isNotEmpty) {
+            students.add(e.trim().toUpperCase());
+          }
+        }
+      }
+
+      final rawPolicy = section['licence'];
+      final policy = rawPolicy is Map
+          ? GateLicencePolicy.fromJson(rawPolicy.cast<String, dynamic>())
+          : defaultLicencePolicy;
+
       return GateState(
         flags: GateFlags.fromJson(<String, dynamic>{
           'features': section['features'],
@@ -234,6 +268,9 @@ class GateClient {
           (section['notice'] as Map?)?.cast<String, dynamic>() ??
               const <String, dynamic>{},
         ),
+        licences: licences,
+        licencePolicy: policy,
+        allowedStudents: students,
         source: source,
         syncedAt: now,
         issuedAt: issued,

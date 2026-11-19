@@ -11,6 +11,7 @@ import 'package:JWHelper/features/attendance/presentation/attendance_provider.da
 import 'package:JWHelper/features/attendance/presentation/attendance_web_actions.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_service.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
+import 'package:JWHelper/features/attendance/data/kq_access.dart';
 import 'package:JWHelper/features/attendance/data/kq_gate.dart';
 import 'package:JWHelper/features/attendance/presentation/kq_auto_screen.dart';
 
@@ -54,6 +55,9 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
 
   /// 自动签到被远程停用了。胶囊要能直接显示这件事，不用点进去才知道。
   bool _gateLocked = false;
+
+  /// 自动签到还没激活（缺授权码）。胶囊显示琥珀色的「未激活」。
+  bool _licenceMissing = false;
 
   /// 上一次为胶囊回源的时间。
   ///
@@ -118,7 +122,7 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
   /// 读一次后台服务的真实状态（开关 + 进程是否活着），变了才重建。
   Future<void> _pollAutoState() async {
     try {
-      await KqGate.load();
+      await KqAccess.load();
       // 停在考勤页时也跟一下远程状态：最迟 60 秒，胶囊就会反映停用/恢复。
       if (DateTime.now().difference(_gatePollAt) >= const Duration(seconds: 60)) {
         _gatePollAt = DateTime.now();
@@ -126,19 +130,22 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
       }
       final config = await KqAutoStore.readConfig();
       final studentNo = await KqAutoStore.readStudentNo();
-      final locked = KqGate.autoBlocker(studentNo) != null;
+      final locked = KqGate.gateBlocker(studentNo, KqAccess.autoSign) != null;
+      final noLicence = KqAccess.missingLicence(studentNo, KqAccess.autoSign);
       final running = config.enabled && await kqIsAutoServiceRunning();
       if (!mounted) return;
       if (config.enabled == _autoConfig.enabled &&
           config.commit == _autoConfig.commit &&
           running == _autoRunning &&
-          locked == _gateLocked) {
+          locked == _gateLocked &&
+          noLicence == _licenceMissing) {
         return;
       }
       setState(() {
         _autoConfig = config;
         _autoRunning = running;
         _gateLocked = locked;
+        _licenceMissing = noLicence;
       });
     } catch (_) {
       // 读不到就维持上一次的状态，不打断页面。
@@ -584,6 +591,9 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
     if (_gateLocked) {
       tone = scheme.error;
       label = '已停用';
+    } else if (_licenceMissing) {
+      tone = const Color(0xFFB26A00);
+      label = '未激活';
     } else if (!enabled) {
       tone = scheme.outline;
       label = '自动签到';

@@ -10,11 +10,28 @@
         "title": "自动签到已停用",
         "body": "作者已在后台关闭这项功能。\n恢复后自动生效，不用更新版本。",
         "confirm": "我知道了"
-      }
+      },
+      "licence": {
+        "required": true,
+        "features": [
+          "autoSign",
+          "manualSign",
+          "forceSign"
+        ]
+      },
+      "licences": [
+        {
+          "kid": "F2A13C7BD4333F4D",
+          "days": 0,
+          "sub": "202608140075",
+          "iat": "2026-11-19T09:13:04Z",
+          "note": "本人·永久"
+        }
+      ]
     }
   },
   "v": 2,
-  "issuedAt": "2026-11-19T08:51:50Z",
-  "expiresAt": "2029-11-18T08:51:50Z",
-  "sig": "eeZBXVk3oqoYitb0ocPYkI9bqbPjLp5kLSem2l/xtcyn+H6HUIx7aTkNFMhc1EyhCJ+UrCYyPNjmad7PycUcDQ=="
+  "issuedAt": "2026-11-19T09:13:04Z",
+  "expiresAt": "2029-11-18T09:13:04Z",
+  "sig": "srGTMBg+DkqXBZbDrxxTiXhpme4QnstyebAXr6gQDK9M4kIxTE4olP3R8givmxrqRvdSi85KxRg0lVMHO6GtAA=="
 }

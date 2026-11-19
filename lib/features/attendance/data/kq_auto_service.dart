@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
+import 'package:JWHelper/features/attendance/data/kq_access.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/kq_client.dart';
 import 'package:JWHelper/features/attendance/data/kq_gate.dart';
+import 'package:JWHelper/features/attendance/data/kq_licence.dart';
 import 'package:JWHelper/features/attendance/data/kq_signer.dart';
 
 /// 前台服务：让签到引擎在 App 退到后台、屏幕熄灭时也能到点干活。
@@ -89,8 +91,11 @@ Future<void> _logGateOnce(String message) async {
 Future<bool> kqStartAutoService() async {
   kqLastStartError = '';
   // 第一道闸：远程开关 + 身份白名单。启动之前就问，别让它先跑起来再被拦。
-  await KqGate.load();
-  final blocked = KqGate.autoBlocker(await KqAutoStore.readStudentNo());
+  await KqAccess.load();
+  final blocked = KqAccess.blocker(
+    await KqAutoStore.readStudentNo(),
+    KqAccess.autoSign,
+  );
   if (blocked != null) {
     kqLastStartError = blocked;
     await _logGateOnce('× 自动签到已被停用：$blocked');
@@ -171,8 +176,8 @@ Future<String> kqServiceDiagnose() async {
   buf.writeln('服务心跳: ${beat.isEmpty ? '（没有，说明服务从没跑起来过）' : beat}');
   final log = await KqAutoStore.readLog();
   buf.writeln('日志行数: ${log.length}');
-  buf.writeln('--- 远程开关 ---');
-  buf.writeln(KqGate.describe());
+  buf.writeln('--- 远程开关 / 授权 ---');
+  buf.writeln(KqAccess.describe(await KqAutoStore.readStudentNo()));
   return buf.toString();
 }
 
@@ -268,13 +273,15 @@ void kqAutoEntryPoint(ServiceInstance service) async {
       // 平时 5 分钟拉一次；临近上课就每轮都拉（10 秒节流）——那时候才真的
       // 可能签上，被停用必须马上落地。只在启动时看一眼不够：服务可能是上一版
       // 留下的，开关也可能是刚在后台被关掉的。
-      await KqGate.load();
+      await KqAccess.load();
       if (near) {
         await KqGate.refresh(force: true);
       } else {
         KqGate.refreshIfStale();
       }
-      final blocked = KqGate.autoBlocker(studentNo);
+      // 回源之后授权表可能变了（被撤销、换绑），先 touch 再判。
+      await KqLicence.touch();
+      final blocked = KqAccess.blocker(studentNo, KqAccess.autoSign);
       if (blocked != null) {
         await _logGateOnce('× 自动签到已被停用：$blocked');
         return;

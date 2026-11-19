@@ -85,6 +85,7 @@ class KqAutoStore {
   static const String _kStartMarker = 'kq_auto_start_marker';
   static const String _kDisclaimer = 'kq_disclaimer_accepted_v1';
   static const String _kGateCache = 'kq_gate_cache_v1';
+  static const String _kLicence = 'kq_licence_v1';
 
   static const int _maxLogLines = 200;
 
@@ -350,6 +351,25 @@ class KqAutoStore {
   static Future<void> saveGateCache(String raw) async {
     if (raw.isEmpty) return;
     _put(_kGateCache, raw);
+  }
+
+  // ---------- 本机授权 ----------
+
+  /// 激活记录：哪个码的指纹、什么时候激活的、最后一次在线。
+  ///
+  /// 不存码本身——存了指纹就够了，码明文只在作者手里。
+  static Future<String> readLicence() async {
+    final v = _readAll()[_kLicence];
+    return v is String ? v : '';
+  }
+
+  static Future<void> saveLicence(String raw) async {
+    if (raw.isEmpty) return;
+    _put(_kLicence, raw);
+  }
+
+  static Future<void> clearLicence() async {
+    _put(_kLicence, null);
   }
 
   // ---------- 心跳 ----------

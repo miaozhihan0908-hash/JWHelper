@@ -21,3 +21,5 @@ export 'gate_client.dart';
 export 'gate_config.dart';
 export 'gate_controller.dart';
 export 'gate_verify.dart';
+export 'licence_evaluate.dart';
+export 'licence_key.dart';
