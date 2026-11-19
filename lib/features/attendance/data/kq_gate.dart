@@ -16,12 +16,20 @@ class KqGate {
 
   /// 镜像按序尝试，第一个验签通过的就用。
   ///
-  /// 顺序考量：GitHub raw 更新最快（没有 CDN 长缓存），但在墙内经常连不上；
-  /// jsDelivr 墙内可达性好，代价是 `@main` 可能被缓存十几小时。所以 raw 在前、
-  /// jsDelivr 兜底——墙内只是多等一次超时。
+  /// 排序依据是**实测的墙内可达性**，不只是理论：
+  /// * `raw.githubusercontent.com` 在模拟器/移动网络上 TCP 直接连不上（不是慢），
+  ///   实测 3 秒超时；它更新最快但没有 CDN 长缓存，排第二位。
+  /// * `api.github.com` 能连通，contents 接口没有 CDN 缓存，拿到的就是最新提交；
+  ///   代价是匿名 60 次/小时——5 分钟一轮够用，临近上课拉得密会被限流，之后
+  ///   自动落到后面的镜像。
+  /// * jsDelivr 墙内可达性好，但 `@main` 会被缓存十几小时，所以**每次改完配置
+  ///   都要 purge 一次**（见 gate.yml / push_files.py）。cdn 与 fastly 同一张
+  ///   CDN，留一个备用域名。
   static const List<String> mirrors = <String>[
+    'https://api.github.com/repos/miaozhihan0908-hash/JWHelper/contents/kq_gate.json?ref=main',
     'https://raw.githubusercontent.com/miaozhihan0908-hash/JWHelper/main/kq_gate.json',
     'https://cdn.jsdelivr.net/gh/miaozhihan0908-hash/JWHelper@main/kq_gate.json',
+    'https://fastly.jsdelivr.net/gh/miaozhihan0908-hash/JWHelper@main/kq_gate.json',
   ];
 
   /// Ed25519 公钥（32 字节）。私钥只在作者手里，丢了只能重新发版换公钥。

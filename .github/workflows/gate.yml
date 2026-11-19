@@ -100,6 +100,15 @@ jobs:
           git commit -m "gate: 更新远程开关配置 ($(date -u +%FT%TZ))"
           git push origin HEAD:${GITHUB_REF_NAME}
 
+      - name: Purge jsDelivr
+        # jsDelivr 对 @main 有十几小时的缓存，不清掉的话墙内会一直看到旧配置。
+        # 清失败也不影响正确性：App 还有 api / raw 两个镜像可用。
+        run: |
+          echo "purge https://purge.jsdelivr.net/gh/miaozhihan0908-hash/JWHelper@main/kq_gate.json"
+          curl -fsS --max-time 25 \
+            "https://purge.jsdelivr.net/gh/miaozhihan0908-hash/JWHelper@main/kq_gate.json" \
+            || echo "（purge 失败，忽略）"
+
       - name: Summary
         run: |
           echo "### 当前 kq_gate.json" >> "$GITHUB_STEP_SUMMARY"

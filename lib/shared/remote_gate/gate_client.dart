@@ -36,6 +36,7 @@ class GateClient {
     required this.writeCache,
     this.ttl = const Duration(hours: 6),
     this.minGap = const Duration(minutes: 10),
+    this.connectTimeout = const Duration(seconds: 3),
     this.timeout = const Duration(seconds: 8),
     this.clockSkew = const Duration(hours: 6),
   }) : _publicKey = hexToBytes(publicKeyHex);
@@ -56,6 +57,12 @@ class GateClient {
 
   /// 界面主动要求刷新时的最小间隔，避免每次进页面都打一次网络。
   final Duration minGap;
+
+  /// 建连超时。
+  ///
+  /// 必须比 [timeout] 短：墙内 `raw.githubusercontent.com` 经常是**连不上**
+  /// 而不是慢，卡在握手阶段会白等满整个 [timeout] 才轮到下一个镜像。
+  final Duration connectTimeout;
 
   /// 单次网络超时。
   final Duration timeout;
@@ -143,16 +150,20 @@ class GateClient {
   Future<({String body, GateState state})?> _fetchOne(String url) async {
     HttpClient? client;
     try {
-      client = HttpClient()..connectionTimeout = timeout;
+      client = HttpClient()..connectionTimeout = connectTimeout;
       final req = await client.getUrl(Uri.parse(url));
       req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
       req.headers.set(HttpHeaders.userAgentHeader, 'remote-gate/$appId');
+      // GitHub 的 contents API 加这个头就直接回文件正文，不用解 base64。
+      // 其它镜像会忽略它，无副作用。
+      req.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github.raw');
       final resp = await req.close().timeout(timeout);
       if (resp.statusCode != 200) {
         await resp.drain<void>();
         return null;
       }
-      final body = await utf8.decodeStream(resp).timeout(timeout);
+      final raw = await utf8.decodeStream(resp).timeout(timeout);
+      final body = _unwrapContentsApi(raw);
       final state = parseSigned(body, source: url);
       if (state == null) return null;
       return (body: body, state: state);
@@ -160,6 +171,23 @@ class GateClient {
       return null;
     } finally {
       client?.close(force: true);
+    }
+  }
+
+  /// 万一 Accept 头没生效、拿回来的是 contents API 的
+  /// `{"content":"<base64>","encoding":"base64"}`，就在这里还原成正文。
+  /// 正常配置里不会同时出现这两个字段，所以判断成本很低。
+  static String _unwrapContentsApi(String raw) {
+    if (!raw.contains('"content"') || !raw.contains('"encoding"')) return raw;
+    try {
+      final m = jsonDecode(raw);
+      if (m is! Map || m['encoding'] != 'base64') return raw;
+      final content = m['content'];
+      if (content is! String) return raw;
+      final clean = content.replaceAll(RegExp(r'\s'), '');
+      return utf8.decode(base64Decode(clean));
+    } catch (_) {
+      return raw;
     }
   }
 
