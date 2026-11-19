@@ -86,6 +86,14 @@ class UpdateService {
     ),
   );
 
+  /// 本构建不跟随上游 fork 的版本号。
+  ///
+  /// 这里的 versionName 是有意钉在 1.0.0 的（正式版对外编号），而上游
+  /// `Sdpei-CTCA/JWHelper` 的 release 已经到 1.4.x；两者一比必然得出
+  /// 「发现新版本 v1.4.5」，而那个包并不是这套改动的构建。关掉之后既不会
+  /// 挂着一条永远消不掉的提示，也不会把用户引去装另一个 APK。
+  static const bool _followUpstreamReleases = false;
+
   static const String _githubLatestApi =
       'https://api.github.com/repos/Sdpei-CTCA/JWHelper/releases/latest';
   static const String _giteeLatestApi =
@@ -93,8 +101,9 @@ class UpdateService {
   static const String _giteeReleasesPage =
       'https://gitee.com/SpongeFun/JWHelper/releases';
 
-  final ValueNotifier<UpdateUiState> updateState =
-      ValueNotifier(const UpdateUiState());
+  final ValueNotifier<UpdateUiState> updateState = ValueNotifier(
+    const UpdateUiState(),
+  );
   String currentVersion = '';
 
   Future<void> init() async {
@@ -159,6 +168,16 @@ class UpdateService {
   Future<UpdateCheckResult> checkUpdate() async {
     final currentVersion = await getCurrentVersion();
 
+    if (!_followUpstreamReleases) {
+      return UpdateCheckResult(
+        hasUpdate: false,
+        latestVersion: currentVersion,
+        currentVersion: currentVersion,
+        releaseNotes: '',
+        downloadUrl: _giteeReleasesPage,
+      );
+    }
+
     final results = await Future.wait([
       _fetchGithubRelease(),
       _fetchGiteeRelease(),
@@ -174,7 +193,8 @@ class UpdateService {
       latestVersion: merged.latestVersion,
       currentVersion: currentVersion,
       releaseNotes: merged.releaseNotes,
-      downloadUrl: merged.downloadUrl ?? _fallbackReleasePage(merged.downloadPlatform),
+      downloadUrl:
+          merged.downloadUrl ?? _fallbackReleasePage(merged.downloadPlatform),
     );
   }
 
@@ -327,7 +347,10 @@ class UpdateService {
     return ValueListenableBuilder<UpdateUiState>(
       valueListenable: updateState,
       builder: (context, state, child) {
-        final icon = Icon(Icons.settings, color: Theme.of(context).colorScheme.primary);
+        final icon = Icon(
+          Icons.settings,
+          color: Theme.of(context).colorScheme.primary,
+        );
         if (!state.hasUpdate) return icon;
         return Badge(
           backgroundColor: Theme.of(context).colorScheme.tertiary,
@@ -343,9 +366,9 @@ class UpdateService {
     final state = updateState.value;
     if (state.downloadUrl == null) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('未找到可用的下载链接')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('未找到可用的下载链接')));
       }
       return;
     }
@@ -353,15 +376,12 @@ class UpdateService {
     final url = state.downloadUrl!;
 
     try {
-      await launchUrl(
-        Uri.parse(url),
-        mode: LaunchMode.externalApplication,
-      );
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('无法打开下载链接: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('无法打开下载链接: $e')));
       }
     }
   }
@@ -392,7 +412,10 @@ class UpdateService {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.new_releases, color: Theme.of(context).colorScheme.tertiary),
+                  Icon(
+                    Icons.new_releases,
+                    color: Theme.of(context).colorScheme.tertiary,
+                  ),
                   const SizedBox(width: 6),
                   Text('发现新版本 v${state.latestVersion ?? ''}'),
                 ],
@@ -452,18 +475,18 @@ class UpdateService {
   }) async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('仅支持在 Android 设备上下载 APK')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('仅支持在 Android 设备上下载 APK')));
       }
       return;
     }
 
     if (downloadUrl == null) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('未找到可用的下载链接')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('未找到可用的下载链接')));
       }
       return;
     }
@@ -480,9 +503,9 @@ class UpdateService {
         },
         onSaved: (path) {
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('已下载到: $path')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('已下载到: $path')));
           }
         },
       );
@@ -493,9 +516,9 @@ class UpdateService {
     } catch (e) {
       if (context.mounted) {
         onProgress(null);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('下载失败：$e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('下载失败：$e')));
       }
     }
   }
