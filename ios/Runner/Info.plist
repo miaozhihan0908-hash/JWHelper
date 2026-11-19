@@ -58,5 +58,17 @@
 			</array>
 		</dict>
 	</array>
+	<!-- flutter_background_service 在 iOS 上靠 BGTaskScheduler 触发后台刷新。
+	     少了这两项，configure 里的 onBackground 永远不会被调用，
+	     表现就是"开关打开了但一直不动"。 -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>dev.flutter.background.refresh</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
 </dict>
 </plist>

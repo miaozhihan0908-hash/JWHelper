@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:permission_handler/permission_handler.dart';
 
 import 'package:JWHelper/features/attendance/data/kq_auto_service.dart';
@@ -208,6 +209,67 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// 导出运行记录：整段塞进剪贴板，再弹一个可长按选中的对话框。
+  ///
+  /// 只带"登录态有/无"，不写 cookie 的值——那是登录凭据，贴出去等于把号给人。
+  Future<void> _exportLog() async {
+    final log = await KqAutoStore.readLog();
+    if (log.isEmpty) {
+      await _toast('还没有运行记录');
+      return;
+    }
+    final cookie = await KqAutoStore.readCookie();
+    final studentNo = await KqAutoStore.readStudentNo();
+    final cfg = await KqAutoStore.readConfig();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final now = DateTime.now();
+    final stamp =
+        '${now.year}-${two(now.month)}-${two(now.day)} '
+        '${two(now.hour)}:${two(now.minute)}';
+
+    final buf = StringBuffer()
+      ..writeln('=== 考勤守护 $stamp ===')
+      ..writeln('学号: ${studentNo.isEmpty ? '（空）' : studentNo}')
+      ..writeln('登录态: ${cookie.isEmpty ? '无' : '有'}')
+      ..writeln(
+        '自动签到: ${cfg.enabled ? '开' : '关'}   '
+        '真正提交: ${cfg.commit ? '开' : '关'}',
+      )
+      ..writeln('心跳: ${_beatAgo()}')
+      ..writeln('共 ${log.length} 行')
+      ..writeln('---')
+      ..writeln(log.join('\n'));
+    final text = buf.toString();
+
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('日志已复制'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              text,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 11,
+                height: 1.5,
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _diagnose() async {
@@ -726,6 +788,13 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
             title: '服务诊断',
             subtitle: '看前台服务、启动标记、心跳和日志行数',
             onTap: _busy ? null : _diagnose,
+          ),
+          _actionTile(
+            theme,
+            icon: Icons.file_upload_outlined,
+            title: '导出日志',
+            subtitle: '复制全部运行记录，可直接粘贴发出来',
+            onTap: _busy ? null : _exportLog,
           ),
           _actionTile(
             theme,
