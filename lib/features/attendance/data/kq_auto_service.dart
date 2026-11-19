@@ -4,6 +4,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/kq_client.dart';
+import 'package:JWHelper/features/attendance/data/kq_gate.dart';
 import 'package:JWHelper/features/attendance/data/kq_signer.dart';
 
 /// 前台服务：让签到引擎在 App 退到后台、屏幕熄灭时也能到点干活。
@@ -69,11 +70,32 @@ Future<void> kqInitAutoService() async {
 /// 最近一次启动失败的原因（给界面显示）。
 String kqLastStartError = '';
 
+/// 停用提示的节流点：半小时最多记一行。
+///
+/// tick 是 20 秒一轮，不节流的话停用期间日志会被同一句话灌满 200 行，
+/// 真正的签到记录全被冲掉。
+DateTime _gateLogAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+Future<void> _logGateOnce(String message) async {
+  final now = DateTime.now();
+  if (now.difference(_gateLogAt) < const Duration(minutes: 30)) return;
+  _gateLogAt = now;
+  await KqAutoStore.appendLog(message);
+}
+
 /// 启动后台守护。返回是否已在运行。
 ///
 /// 每一步都单独兜住异常：启动失败要能回话，最怕的是整个进程被原生层带走。
 Future<bool> kqStartAutoService() async {
   kqLastStartError = '';
+  // 第一道闸：远程开关 + 身份白名单。启动之前就问，别让它先跑起来再被拦。
+  await KqGate.load();
+  final blocked = KqGate.autoBlocker(await KqAutoStore.readStudentNo());
+  if (blocked != null) {
+    kqLastStartError = blocked;
+    await _logGateOnce('× 自动签到已被停用：$blocked');
+    return false;
+  }
   final service = FlutterBackgroundService();
   try {
     if (await service.isRunning()) return true;
@@ -149,11 +171,17 @@ Future<String> kqServiceDiagnose() async {
   buf.writeln('服务心跳: ${beat.isEmpty ? '（没有，说明服务从没跑起来过）' : beat}');
   final log = await KqAutoStore.readLog();
   buf.writeln('日志行数: ${log.length}');
+  buf.writeln('--- 远程开关 ---');
+  buf.writeln(KqGate.describe());
   return buf.toString();
 }
 
 /// 开关是开着的就把服务拉起来（冷启动后恢复）。
 Future<bool> kqStartAutoServiceIfEnabled() async {
+  // 冷启动先读本地缓存（不联网）：网络差的时候闸门也得是准的。
+  // 真正的回源挂在后台，慢一点不影响启动。
+  await KqGate.load();
+  KqGate.refreshIfStale();
   final cfg = await KqAutoStore.readConfig();
   if (!cfg.enabled) return false;
   return kqStartAutoService();
@@ -226,6 +254,16 @@ void kqAutoEntryPoint(ServiceInstance service) async {
       final studentNo = await KqAutoStore.readStudentNo();
       if (cookie.isEmpty || studentNo.isEmpty) {
         await KqAutoStore.appendLog('缺少登录态：先在 App 里打开一次考勤页');
+        return;
+      }
+
+      // 第二道闸：每一轮都重判。
+      // 服务可能是上一版留下的，开关也可能是刚在后台被关掉的——只在启动时
+      // 看一眼不够，那要等到下次冷启动才生效。
+      await KqGate.load();
+      final blocked = KqGate.autoBlocker(studentNo);
+      if (blocked != null) {
+        await _logGateOnce('× 自动签到已被停用：$blocked');
         return;
       }
 

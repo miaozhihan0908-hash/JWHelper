@@ -84,6 +84,7 @@ class KqAutoStore {
   static const String _kLastBeat = 'kq_auto_beat';
   static const String _kStartMarker = 'kq_auto_start_marker';
   static const String _kDisclaimer = 'kq_disclaimer_accepted_v1';
+  static const String _kGateCache = 'kq_gate_cache_v1';
 
   static const int _maxLogLines = 200;
 
@@ -333,6 +334,22 @@ class KqAutoStore {
 
   static Future<void> saveDisclaimerAccepted() async {
     _put(_kDisclaimer, true);
+  }
+
+  // ---------- 远程开关缓存 ----------
+
+  /// 上一次验签通过的那份配置**原文**（含签名）。
+  ///
+  /// 存原文而不是解析后的状态：冷启动会重新验一遍签，改本地文件等于让这份
+  /// 配置作废，而不是直接生效。字段将来变了，用新代码重新解析也还是对的。
+  static Future<String> readGateCache() async {
+    final v = _readAll()[_kGateCache];
+    return v is String ? v : '';
+  }
+
+  static Future<void> saveGateCache(String raw) async {
+    if (raw.isEmpty) return;
+    _put(_kGateCache, raw);
   }
 
   // ---------- 心跳 ----------

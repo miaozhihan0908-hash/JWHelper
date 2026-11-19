@@ -4,7 +4,9 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'package:JWHelper/features/attendance/data/kq_auto_service.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
+import 'package:JWHelper/features/attendance/data/kq_gate.dart';
 import 'package:JWHelper/features/attendance/data/kq_signer.dart';
+import 'package:JWHelper/shared/remote_gate/remote_gate.dart';
 
 /// 自动签到。
 ///
@@ -31,6 +33,13 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
   DateTime? _beatAt;
   List<String> _log = const <String>[];
 
+  /// 被远程开关挡住的原因；null 表示这个功能现在能用。
+  String? _autoBlock;
+  String? _manualBlock;
+
+  /// 停用时给用户看的那段话（来自远程配置，作者随时能改）。
+  GateNotice _notice = GateNotice.fallback;
+
   @override
   void initState() {
     super.initState();
@@ -38,17 +47,37 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
   }
 
   Future<void> _reload() async {
-    final config = await KqAutoStore.readConfig();
-    final running = await kqIsAutoServiceRunning();
+    // 先读本地缓存，再把回源顶多等两秒：网络差也不至于让整页卡住。
+    await KqGate.load();
+    await KqGate.refreshQuick();
+
+    var config = await KqAutoStore.readConfig();
+    var running = await kqIsAutoServiceRunning();
     final at = await KqAutoStore.readAuthAt();
     final cookie = await KqAutoStore.readCookie();
+    final studentNo = await KqAutoStore.readStudentNo();
     final beatAt = await KqAutoStore.readBeatAt();
     final log = await KqAutoStore.readLog();
+
+    // 被远程停用、而服务还在跑：真的停掉它，不是只把开关变灰就完事。
+    if (running && KqGate.autoBlocker(studentNo) != null) {
+      await kqStopAutoService();
+      if (config.enabled) {
+        config = config.copyWith(enabled: false);
+        await KqAutoStore.saveConfig(config);
+      }
+      running = false;
+      await KqAutoStore.appendLog('× 远程停用：后台守护已停止');
+    }
+
     if (!mounted) return;
     String two(int n) => n.toString().padLeft(2, '0');
     setState(() {
       _config = config;
       _serviceRunning = running;
+      _notice = KqGate.notice;
+      _autoBlock = KqGate.autoBlocker(studentNo);
+      _manualBlock = KqGate.manualBlocker(studentNo);
       _beatAt = beatAt;
       _authText = cookie.isEmpty
           ? '未就绪'
@@ -69,6 +98,11 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
   // ---------------- 开关 ----------------
 
   Future<void> _toggleEnabled(bool enabled) async {
+    final blocked = _autoBlock;
+    if (enabled && blocked != null) {
+      await _toast(blocked);
+      return;
+    }
     setState(() => _busy = true);
     try {
       if (!enabled) {
@@ -179,6 +213,11 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
     bool force = false,
   }) async {
     if (_busy) return;
+    final blocked = _manualBlock;
+    if (blocked != null) {
+      await _toast(blocked);
+      return;
+    }
     setState(() => _busy = true);
     try {
       final cookie = await KqAutoStore.readCookie();
@@ -192,6 +231,8 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
         studentNo: studentNo,
         commit: _config.commit,
         jitterSigma: _config.jitterSigma,
+        // 这是手动那条路，归「手动签到」这个开关管。
+        gateFeature: KqGate.featureManualSign,
       );
       try {
         final n = await signer.runOnce(mode: mode, force: force);
@@ -357,6 +398,7 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
+          if (_autoBlock != null || _manualBlock != null) _gateBanner(theme),
           _statusCard(theme),
           const SizedBox(height: 14),
           _manualActions(theme),
@@ -518,6 +560,113 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
     return null;
   }
 
+  /// 被远程开关挡住时的横幅：说清是谁停的，点一下能看全文。
+  Widget _gateBanner(ThemeData theme) {
+    final scheme = theme.colorScheme;
+    final reason = _autoBlock ?? _manualBlock!;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: scheme.error.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.lock_outline_rounded, size: 18, color: scheme.error),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _notice.title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: scheme.error,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  reason,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _showGateDetail,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(_notice.confirm),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 完整文案：正文可能有几行，横幅里放不下。
+  Future<void> _showGateDetail() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_notice.title),
+        content: SingleChildScrollView(child: Text(_notice.body)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(_notice.confirm),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 远程状态：开关来自哪个镜像、什么时候同步的、现在是什么值。
+  Future<void> _showGateStatus() async {
+    setState(() => _busy = true);
+    try {
+      await KqGate.refreshQuick();
+      final text = KqGate.describe();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('远程状态'),
+          content: SingleChildScrollView(
+            child: SelectableText(
+              text,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12,
+                height: 1.5,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      );
+      await _reload();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Widget _metaItem(ThemeData theme, IconData icon, String label, String value) {
     final scheme = theme.colorScheme;
     return Expanded(
@@ -584,7 +733,7 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
             ),
             const Spacer(),
             TextButton.icon(
-              onPressed: _busy ? null : _selfTest,
+              onPressed: (_busy || _manualBlock != null) ? null : _selfTest,
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 minimumSize: const Size(0, 32),
@@ -601,7 +750,7 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
           children: [
             Expanded(
               child: FilledButton.icon(
-                onPressed: _busy
+                onPressed: (_busy || _manualBlock != null)
                     ? null
                     : () => _runSigner(mode: KqSignMode.signIn),
                 style: FilledButton.styleFrom(
@@ -616,7 +765,7 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: FilledButton.tonalIcon(
-                onPressed: _busy
+                onPressed: (_busy || _manualBlock != null)
                     ? null
                     : () => _runSigner(mode: KqSignMode.signOut),
                 style: FilledButton.styleFrom(
@@ -631,7 +780,7 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: OutlinedButton.icon(
-                onPressed: _busy ? null : _forceSign,
+                onPressed: (_busy || _manualBlock != null) ? null : _forceSign,
                 style: OutlinedButton.styleFrom(
                   minimumSize: const Size(0, 46),
                   shape: radius,
@@ -660,12 +809,18 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
       child: Column(
         children: [
           SwitchListTile.adaptive(
-            value: _config.enabled,
-            onChanged: _busy ? null : _toggleEnabled,
+            value: _config.enabled && _autoBlock == null,
+            onChanged: (_busy || _autoBlock != null) ? null : _toggleEnabled,
             contentPadding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
-            secondary: Icon(Icons.schedule_rounded, color: scheme.primary),
+            secondary: Icon(
+              _autoBlock == null ? Icons.schedule_rounded : Icons.lock_outline,
+              color: _autoBlock == null ? scheme.primary : scheme.outline,
+            ),
             title: const Text('自动签到'),
-            subtitle: Text(_serviceRunning ? '服务在后台运行' : '开启后到点自动签，退到后台也算数'),
+            subtitle: Text(
+              _autoBlock ??
+                  (_serviceRunning ? '服务在后台运行' : '开启后到点自动签，退到后台也算数'),
+            ),
           ),
           Divider(
             height: 1,
@@ -782,6 +937,13 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
           ),
         ),
         children: [
+          _actionTile(
+            theme,
+            icon: Icons.cloud_sync_outlined,
+            title: '远程状态',
+            subtitle: '开关来自哪、什么时候同步的、现在是什么值',
+            onTap: _showGateStatus,
+          ),
           _actionTile(
             theme,
             icon: Icons.medical_information_outlined,

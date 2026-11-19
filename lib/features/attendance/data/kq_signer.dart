@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/geo.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/kq_client.dart';
+import 'package:JWHelper/features/attendance/data/kq_gate.dart';
+import 'package:JWHelper/features/attendance/data/kq_license.dart';
 
 /// 手动触发的范围。
 ///
@@ -25,6 +27,7 @@ class KqSigner {
     required this.studentNo,
     required this.commit,
     this.jitterSigma = 10,
+    this.gateFeature,
     this.onLog,
   });
 
@@ -32,6 +35,13 @@ class KqSigner {
   final String studentNo;
   final bool commit;
   final double jitterSigma;
+
+  /// 这次跑的是哪个功能（[KqGate.featureAutoSign] / [KqGate.featureManualSign]）。
+  ///
+  /// 后台轮询和手动按钮走的是同一个执行器，但归两个开关管；由调用方告诉
+  /// 这里该按哪一个判，别在内部猜。
+  final String? gateFeature;
+
   final void Function(String message)? onLog;
 
   final math.Random _rnd = math.Random();
@@ -51,6 +61,22 @@ class KqSigner {
     bool force = false,
     KqSignMode mode = KqSignMode.both,
   }) async {
+    // 第三道闸：闸门放在真正发请求之前，不管从哪条路进来都要先过这一关
+    // （界面按钮、后台服务、以后新加的口子）。身份不在白名单里就一条都发不出去。
+    if (!KqGate.identityAllows(studentNo)) {
+      final msg = KqLicense.deniedMessage;
+      await KqAutoStore.appendLog('× 未授权：$msg');
+      _log('× 未授权：$msg');
+      return 0;
+    }
+    final feature = gateFeature;
+    if (feature != null && !KqGate.controller.allows(studentNo, feature)) {
+      final msg = KqGate.notice.body;
+      await KqAutoStore.appendLog('× 功能已停用：$msg');
+      _log('× 功能已停用：$msg');
+      return 0;
+    }
+
     final now = DateTime.now();
     final day = ymd(now);
 

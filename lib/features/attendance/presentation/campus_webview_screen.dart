@@ -11,6 +11,7 @@ import 'package:JWHelper/features/attendance/presentation/attendance_provider.da
 import 'package:JWHelper/features/attendance/presentation/attendance_web_actions.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_service.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
+import 'package:JWHelper/features/attendance/data/kq_gate.dart';
 import 'package:JWHelper/features/attendance/presentation/kq_auto_screen.dart';
 
 /// 智慧考勤网页版（底部导航「考勤」tab 主体）。
@@ -50,6 +51,9 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
   /// 自动签到的实时状态：右下角胶囊靠它变色，不用点进去才知道开没开。
   KqAutoConfig _autoConfig = const KqAutoConfig();
   bool _autoRunning = false;
+
+  /// 自动签到被远程停用了。胶囊要能直接显示这件事，不用点进去才知道。
+  bool _gateLocked = false;
   Timer? _autoPoller;
 
   @override
@@ -107,17 +111,22 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
   /// 读一次后台服务的真实状态（开关 + 进程是否活着），变了才重建。
   Future<void> _pollAutoState() async {
     try {
+      await KqGate.load();
       final config = await KqAutoStore.readConfig();
+      final studentNo = await KqAutoStore.readStudentNo();
+      final locked = KqGate.autoBlocker(studentNo) != null;
       final running = config.enabled && await kqIsAutoServiceRunning();
       if (!mounted) return;
       if (config.enabled == _autoConfig.enabled &&
           config.commit == _autoConfig.commit &&
-          running == _autoRunning) {
+          running == _autoRunning &&
+          locked == _gateLocked) {
         return;
       }
       setState(() {
         _autoConfig = config;
         _autoRunning = running;
+        _gateLocked = locked;
       });
     } catch (_) {
       // 读不到就维持上一次的状态，不打断页面。
@@ -431,6 +440,18 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
       if (go != true) return;
     }
     if (!mounted) return;
+
+    // 远程总闸：拉一次最新状态再决定放不放行（最多等两秒，拿不到就用缓存）。
+    await KqGate.load();
+    await KqGate.refreshQuick();
+    if (!mounted) return;
+    final studentNo = await KqAutoStore.readStudentNo();
+    if (KqGate.killAll || !KqGate.identityAllows(studentNo)) {
+      await _showGateNotice();
+      await _pollAutoState();
+      return;
+    }
+
     await Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const KqAutoScreen()));
@@ -516,6 +537,25 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
     return result == true;
   }
 
+  /// 整个功能被停用时拦在门口的弹窗。文案来自远程配置，作者随时能改。
+  Future<void> _showGateNotice() async {
+    final notice = KqGate.notice;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(notice.title),
+        content: SingleChildScrollView(child: Text(notice.body)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(notice.confirm),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 右下角状态胶囊：既是进自动签到的入口，也直接回答「它现在在不在干活」。
   ///
   /// 原来这里是个纯图标悬浮球——关着和开着长得一模一样，想确认状态只能点进去。
@@ -529,7 +569,10 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
 
     final Color tone;
     final String label;
-    if (!enabled) {
+    if (_gateLocked) {
+      tone = scheme.error;
+      label = '已停用';
+    } else if (!enabled) {
       tone = scheme.outline;
       label = '自动签到';
     } else if (!running) {

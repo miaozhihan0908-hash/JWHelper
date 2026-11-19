@@ -1,0 +1,108 @@
+name: gate
+
+# 远程开关的一键签名。
+#
+# 只做一件事：拿 GATE_PRIVATE_KEY 重新签一份 kq_gate.json 并提交。
+# 私钥永不入库；App 里写死的是对应的公钥，没有私钥就改不动配置。
+#
+# 用法：Actions → gate → Run workflow，把要改的项填上，留空的项保持原值。
+# 提交后 App 下次回源（进「自动签到」页 / 后台每 6 小时）就生效，不用发版。
+
+on:
+  workflow_dispatch:
+    inputs:
+      kill_all:
+        description: "总闸 killAll：on 全部停用 / off 恢复 / 留空不改"
+        required: false
+        default: ""
+      auto_sign:
+        description: "自动签到 autoSign：on / off / 留空不改"
+        required: false
+        default: ""
+      manual_sign:
+        description: "手动签到 manualSign：on / off / 留空不改"
+        required: false
+        default: ""
+      notice_title:
+        description: "停用弹窗的标题（留空不改）"
+        required: false
+        default: ""
+      notice_body:
+        description: "停用弹窗的正文，换行写 \\n（留空不改）"
+        required: false
+        default: ""
+      notice_confirm:
+        description: "停用弹窗的按钮文字（留空不改）"
+        required: false
+        default: ""
+      expires_days:
+        description: "这份配置的有效期天数，默认 1095"
+        required: false
+        default: "1095"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gate
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    name: Sign kq_gate.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PyNaCl
+        run: pip install --quiet pynacl
+
+      - name: Sign
+        env:
+          GATE_PRIVATE_KEY: ${{ secrets.GATE_PRIVATE_KEY }}
+          KILL_ALL: ${{ inputs.kill_all }}
+          AUTO_SIGN: ${{ inputs.auto_sign }}
+          MANUAL_SIGN: ${{ inputs.manual_sign }}
+          N_TITLE: ${{ inputs.notice_title }}
+          N_BODY: ${{ inputs.notice_body }}
+          N_CONFIRM: ${{ inputs.notice_confirm }}
+          GATE_EXPIRES_DAYS: ${{ inputs.expires_days }}
+        run: |
+          if [ -z "$GATE_PRIVATE_KEY" ]; then
+            echo "::error::仓库还没有配置 GATE_PRIVATE_KEY 这个 secret"
+            exit 1
+          fi
+          python sign_gate.py \
+            --kill-all "$KILL_ALL" \
+            --auto-sign "$AUTO_SIGN" \
+            --manual-sign "$MANUAL_SIGN" \
+            --notice-title "$N_TITLE" \
+            --notice-body "$N_BODY" \
+            --notice-confirm "$N_CONFIRM"
+
+      - name: Commit
+        run: |
+          git config user.name "gate-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if git diff --quiet -- kq_gate.json; then
+            echo "配置没有变化，不提交。"
+            exit 0
+          fi
+          git add kq_gate.json
+          git commit -m "gate: 更新远程开关配置 ($(date -u +%FT%TZ))"
+          git push origin HEAD:${GITHUB_REF_NAME}
+
+      - name: Summary
+        run: |
+          echo "### 当前 kq_gate.json" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat kq_gate.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
