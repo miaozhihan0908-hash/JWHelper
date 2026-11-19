@@ -138,6 +138,33 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
   }
 
   Future<void> _runNow() async {
+    // force 会同时绕过时间窗和「已签到」判断，直接打 doSign。开着真提交时
+    // 按这一下就是真的签到，所以先问一句：这是全 App 唯一能无视时间窗
+    // 写进考勤记录的动作。
+    if (_config.commit) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('立刻跑一次'),
+          content: const Text(
+            '这个动作会无视时间窗直接提交：不在上课时间、或者以为已经签过，'
+            '它也会真的发一次请求。\n\n现在「真正提交」是开着的，所以可能真的'
+            '在校外时间签上一次。要继续吗？',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('继续'),
+            ),
+          ],
+        ),
+      );
+      if (go != true || !mounted) return;
+    }
     setState(() => _busy = true);
     try {
       final cookie = await KqAutoStore.readCookie();
@@ -203,6 +230,29 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
   }
 
   Future<void> _clearLog() async {
+    // 日志是出问题时唯一的证据来源（例如"到底是谁签的"），清掉就找不回来了，
+    // 所以不再是一点就没。
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空运行记录？'),
+        content: const Text('只删本地这份日志，不会撤回已经提交的签到。清掉之后没法再回查。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('清空'),
+          ),
+        ],
+      ),
+    );
+    if (go != true) return;
     await KqAutoStore.clearLog();
     await _reload();
   }
@@ -227,7 +277,11 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
           _statusCard(theme),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
+          _quickActions(theme),
+          const SizedBox(height: 10),
+          _recordEntry(theme),
+          const SizedBox(height: 14),
           _switches(theme),
           const SizedBox(height: 16),
           _recentLog(theme),
@@ -349,9 +403,40 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
               ],
             ),
           ),
+          if (_lastResultLine() != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(
+                  Icons.check_circle_rounded,
+                  size: 14,
+                  color: Color(0xFF1F9E58),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '最近：${_lastResultLine()}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// 日志里最近一次成功签到的原话。日志最新在前，取第一条命中即可。
+  String? _lastResultLine() {
+    for (final line in _log) {
+      if (line.contains('✓ 签到成功')) return line;
+    }
+    return null;
   }
 
   Widget _metaItem(ThemeData theme, IconData icon, String label, String value) {
@@ -395,6 +480,101 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
     if (d.inMinutes < 60) return '${d.inMinutes} 分钟前';
     if (d.inHours < 24) return '${d.inHours} 小时前';
     return '${d.inDays} 天前';
+  }
+
+  /// 两个真正高频的动作。原来它们埋在「更多」里，和「电池白名单」这种一次性
+  /// 设置同样大小、同样位置——最常用的反而最难找。
+  Widget _quickActions(ThemeData theme) {
+    return Row(
+      children: [
+        Expanded(
+          child: FilledButton.icon(
+            onPressed: _busy ? null : _runNow,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 46),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            icon: const Icon(Icons.play_arrow_rounded, size: 20),
+            label: const Text('立刻跑一次'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: FilledButton.tonalIcon(
+            onPressed: _busy ? null : _selfTest,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 46),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            icon: const Icon(Icons.network_check_rounded, size: 18),
+            label: const Text('自检'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _recordEntry(ThemeData theme) {
+    final scheme = theme.colorScheme;
+    return Material(
+      color: scheme.surfaceContainerLowest,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const KqRecordScreen()),
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: scheme.outlineVariant.withValues(alpha: 0.5),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.receipt_long_outlined,
+                size: 18,
+                color: scheme.primary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '考勤记录',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      '按日期读取课表与出勤明细',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: scheme.outline,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _switches(ThemeData theme) {
@@ -532,20 +712,6 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
         children: [
           _actionTile(
             theme,
-            icon: Icons.network_check_rounded,
-            title: '连通性自检',
-            subtitle: '只读一次课表，确认现在能不能拿到数据',
-            onTap: _busy ? null : _selfTest,
-          ),
-          _actionTile(
-            theme,
-            icon: Icons.bolt_rounded,
-            title: '立刻签一轮',
-            subtitle: '不等定时器，马上按当前状态跑一次',
-            onTap: _busy ? null : _runNow,
-          ),
-          _actionTile(
-            theme,
             icon: Icons.medical_information_outlined,
             title: '服务诊断',
             subtitle: '看前台服务、启动标记、心跳和日志行数',
@@ -560,21 +726,11 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
           ),
           _actionTile(
             theme,
-            icon: Icons.receipt_long_outlined,
-            title: '考勤记录',
-            subtitle: '按日期读取课表与出勤明细',
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const KqRecordScreen()),
-              );
-            },
-          ),
-          _actionTile(
-            theme,
             icon: Icons.delete_outline_rounded,
             title: '清空运行记录',
             subtitle: '只删本地日志，不影响已经提交的签到',
             onTap: _clearLog,
+            danger: true,
           ),
         ],
       ),
@@ -587,14 +743,21 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
     required String title,
     required String subtitle,
     required VoidCallback? onTap,
+    bool danger = false,
   }) {
     final scheme = theme.colorScheme;
+    final tint = danger ? scheme.error : scheme.onSurfaceVariant;
     return ListTile(
       onTap: onTap,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      leading: Icon(icon, size: 20, color: scheme.onSurfaceVariant),
-      title: Text(title, style: theme.textTheme.bodyMedium),
+      leading: Icon(icon, size: 20, color: tint),
+      title: Text(
+        title,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: danger ? scheme.error : null,
+        ),
+      ),
       subtitle: Text(
         subtitle,
         style: theme.textTheme.bodySmall?.copyWith(

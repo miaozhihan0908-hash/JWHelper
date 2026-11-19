@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -46,6 +48,11 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
   AttendanceWebActions? _actions;
   String? _prepareError;
 
+  /// 自动签到的实时状态：右下角胶囊靠它变色，不用点进去才知道开没开。
+  KqAutoConfig _autoConfig = const KqAutoConfig();
+  bool _autoRunning = false;
+  Timer? _autoPoller;
+
   @override
   void initState() {
     super.initState();
@@ -90,10 +97,39 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
       _registeredActions = true;
       _prepareAndLoad();
     });
+
+    // 胶囊的状态要自己跟：服务是后台另一条链路在跑，页面这边不监听它。
+    _pollAutoState();
+    _autoPoller = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _pollAutoState(),
+    );
+  }
+
+  /// 读一次后台服务的真实状态（开关 + 进程是否活着），变了才重建。
+  Future<void> _pollAutoState() async {
+    try {
+      final config = await KqAutoStore.readConfig();
+      final running = config.enabled && await kqIsAutoServiceRunning();
+      if (!mounted) return;
+      if (config.enabled == _autoConfig.enabled &&
+          config.commit == _autoConfig.commit &&
+          running == _autoRunning) {
+        return;
+      }
+      setState(() {
+        _autoConfig = config;
+        _autoRunning = running;
+      });
+    } catch (_) {
+      // 读不到就维持上一次的状态，不打断页面。
+    }
   }
 
   @override
   void dispose() {
+    _autoPoller?.cancel();
+    _autoPoller = null;
     // 页面被销毁（例如账号被清除）后标题栏不应再留着按钮。
     // 注销会通知监听者，而 dispose 可能发生在 build/dispose 阶段，
     // 因此推迟到当前帧结束再执行。
@@ -375,31 +411,71 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
     }
   }
 
-  /// 右下角小入口：打开自动签到。刻意做小，避免遮挡网页内容。
+  /// 右下角状态胶囊：既是进自动签到的入口，也直接回答「它现在在不在干活」。
+  ///
+  /// 原来这里是个纯图标悬浮球——关着和开着长得一模一样，想确认状态只能点进去。
+  /// 现在改成带状态点的胶囊：绿=运行中，琥珀=开关开了但服务没起来，灰=没开，
+  /// 主题色=演练（真正提交关着，只写记录不发请求）。
   Widget _buildAutoEntry() {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Tooltip(
-      message: '自动签到',
-      child: Material(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.92),
-        shape: const CircleBorder(),
-        elevation: 2,
-        shadowColor: scheme.shadow.withValues(alpha: 0.2),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const KqAutoScreen()),
-            );
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Icon(
-              Icons.auto_mode_rounded,
-              size: 20,
-              color: scheme.primary,
-            ),
+    final enabled = _autoConfig.enabled;
+    final running = enabled && _autoRunning;
+
+    final Color tone;
+    final String label;
+    if (!enabled) {
+      tone = scheme.outline;
+      label = '自动签到';
+    } else if (!running) {
+      tone = const Color(0xFFB26A00);
+      label = '待启动';
+    } else if (!_autoConfig.commit) {
+      tone = scheme.primary;
+      label = '演练中';
+    } else {
+      tone = const Color(0xFF1F9E58);
+      label = '自动签到';
+    }
+
+    return Material(
+      color: scheme.surface.withValues(alpha: 0.94),
+      shape: const StadiumBorder(),
+      elevation: 3,
+      shadowColor: scheme.shadow.withValues(alpha: 0.25),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: () async {
+          await Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: (_) => const KqAutoScreen()));
+          // 回来立刻对齐一次：用户可能刚在里面开了或关了服务。
+          await _pollAutoState();
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 7, 6, 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: tone, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurface,
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 16,
+                color: scheme.outline,
+              ),
+            ],
           ),
         ),
       ),
