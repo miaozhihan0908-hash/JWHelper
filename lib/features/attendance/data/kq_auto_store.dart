@@ -83,6 +83,7 @@ class KqAutoStore {
   static const String _kDone = 'kq_auto_done';
   static const String _kLastBeat = 'kq_auto_beat';
   static const String _kStartMarker = 'kq_auto_start_marker';
+  static const String _kDisclaimer = 'kq_disclaimer_accepted_v1';
 
   static const int _maxLogLines = 200;
 
@@ -317,6 +318,21 @@ class KqAutoStore {
   static Future<String> readStartMarker() async {
     final v = _readAll()[_kStartMarker];
     return v is String ? v : '';
+  }
+
+  // ---------- 免责声明 ----------
+
+  /// 用户是否勾选过「我已知晓，不再提示」。
+  ///
+  /// 勾选与"进入功能"是同一次操作：点了"进入功能"才把勾记下来，
+  /// 直接关掉弹窗不会记住，下次进入还会再问。
+  static Future<bool> readDisclaimerAccepted() async {
+    final v = _readAll()[_kDisclaimer];
+    return v == true;
+  }
+
+  static Future<void> saveDisclaimerAccepted() async {
+    _put(_kDisclaimer, true);
   }
 
   // ---------- 心跳 ----------

@@ -4,7 +4,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_service.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
 import 'package:JWHelper/features/attendance/data/kq_signer.dart';
-import 'package:JWHelper/features/attendance/presentation/kq_record_screen.dart';
 
 /// 自动签到。
 ///
@@ -299,9 +298,7 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
           _statusCard(theme),
           const SizedBox(height: 14),
           _manualActions(theme),
-          const SizedBox(height: 10),
-          _recordEntry(theme),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           _switches(theme),
           const SizedBox(height: 16),
           _recentLog(theme),
@@ -587,65 +584,6 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
           ],
         ),
       ],
-    );
-  }
-
-  Widget _recordEntry(ThemeData theme) {
-    final scheme = theme.colorScheme;
-    return Material(
-      color: scheme.surfaceContainerLowest,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(builder: (_) => const KqRecordScreen()),
-          );
-        },
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.5),
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                Icons.receipt_long_outlined,
-                size: 18,
-                color: scheme.primary,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '考勤记录',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      '按日期读取课表与出勤明细',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 18,
-                color: scheme.outline,
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 

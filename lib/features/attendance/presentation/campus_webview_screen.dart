@@ -409,6 +409,113 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
     }
   }
 
+  /// 免责声明正文。首次进入自动签到页必须先过这一关。
+  static const String _disclaimerText =
+      '本功能仅供交流学习和技术研究使用，禁止用于商业或非法用途。'
+      '使用者应自行承担使用风险。作者不对任何第三方转载、复制、打包、修改、'
+      '分发、售卖或传播本插件的行为负责，由此产生的一切责任由传播者或使用者'
+      '自行承担。下载、安装或使用即视为同意本声明。如不同意，请立即停止使用'
+      '并删除本插件。';
+
+  /// 打开自动签到页。没同意过声明就先弹窗拦截，「不同意」直接留在考勤页。
+  Future<void> _openAutoScreen() async {
+    var accepted = false;
+    try {
+      accepted = await KqAutoStore.readDisclaimerAccepted();
+    } catch (_) {
+      // 读不到就当没同意过，宁可多问一次。
+    }
+    if (!accepted) {
+      if (!mounted) return;
+      final go = await _showDisclaimer();
+      if (go != true) return;
+    }
+    if (!mounted) return;
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const KqAutoScreen()));
+    // 回来立刻对齐一次：用户可能刚在里面开了或关了服务。
+    await _pollAutoState();
+  }
+
+  /// 弹免责声明，返回 true 表示用户选「进入功能」。
+  ///
+  /// 「我已知晓，不再提示」只在点了「进入功能」时才落盘：随手关掉弹窗不会
+  /// 记住，下次进来还会再问一遍。
+  Future<bool> _showDisclaimer() async {
+    var dontAsk = false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            final theme = Theme.of(ctx);
+            return AlertDialog(
+              title: const Text('使用声明'),
+              contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              content: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _disclaimerText,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        height: 1.75,
+                        fontSize: 13.5,
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => setLocal(() => dontAsk = !dontAsk),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 32,
+                              child: Checkbox(
+                                value: dontAsk,
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                onChanged: (v) =>
+                                    setLocal(() => dontAsk = v ?? false),
+                              ),
+                            ),
+                            const Expanded(child: Text('我已知晓，不再提示')),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('不同意'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('进入功能'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (result == true && dontAsk) {
+      try {
+        await KqAutoStore.saveDisclaimerAccepted();
+      } catch (_) {}
+    }
+    return result == true;
+  }
+
   /// 右下角状态胶囊：既是进自动签到的入口，也直接回答「它现在在不在干活」。
   ///
   /// 原来这里是个纯图标悬浮球——关着和开着长得一模一样，想确认状态只能点进去。
@@ -443,13 +550,7 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
       shadowColor: scheme.shadow.withValues(alpha: 0.25),
       child: InkWell(
         customBorder: const StadiumBorder(),
-        onTap: () async {
-          await Navigator.of(
-            context,
-          ).push(MaterialPageRoute<void>(builder: (_) => const KqAutoScreen()));
-          // 回来立刻对齐一次：用户可能刚在里面开了或关了服务。
-          await _pollAutoState();
-        },
+        onTap: _openAutoScreen,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 7, 6, 7),
           child: Row(
