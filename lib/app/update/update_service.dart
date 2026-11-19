@@ -118,6 +118,13 @@ class UpdateService {
   Future<void> checkForUpdates({bool silent = false}) async {
     if (updateState.value.checking) return;
 
+    // 不跟随上游 release：直接落成"没有更新"。放在这里而不是 checkUpdate
+    // 里面，是为了让 checkUpdate 保持纯粹的取数 + 合并逻辑（单测覆盖的就是它）。
+    if (!_followUpstreamReleases) {
+      updateState.value = const UpdateUiState();
+      return;
+    }
+
     updateState.value = updateState.value.copyWith(
       checking: true,
       clearError: !silent,
@@ -167,16 +174,6 @@ class UpdateService {
 
   Future<UpdateCheckResult> checkUpdate() async {
     final currentVersion = await getCurrentVersion();
-
-    if (!_followUpstreamReleases) {
-      return UpdateCheckResult(
-        hasUpdate: false,
-        latestVersion: currentVersion,
-        currentVersion: currentVersion,
-        releaseNotes: '',
-        downloadUrl: _giteeReleasesPage,
-      );
-    }
 
     final results = await Future.wait([
       _fetchGithubRelease(),
