@@ -53,7 +53,9 @@ class KqSigner {
     final courses = coursesOf(resp);
     if (courses.isEmpty) {
       // 未登录时服务端返回的是一句纯文本，这里原样抛给日志。
-      final tip = resp is String ? resp : '课表为空 (${resp is Map ? resp['code'] : resp})';
+      final tip = resp is String
+          ? resp
+          : '课表为空 (${resp is Map ? resp['code'] : resp})';
       await KqAutoStore.appendLog('课表不可用：$tip');
       _log('课表不可用：$tip');
       return 0;
@@ -91,7 +93,9 @@ class KqSigner {
         signed++;
         await KqAutoStore.markDone(key);
       }
-      await Future<void>.delayed(Duration(milliseconds: 900 + _rnd.nextInt(1800)));
+      await Future<void>.delayed(
+        Duration(milliseconds: 900 + _rnd.nextInt(1800)),
+      );
     }
 
     // ---- 签退 ----
@@ -100,10 +104,13 @@ class KqSigner {
       final w = _signOutWindow(c, now);
       if (now.isBefore(w.$1) || now.isAfter(w.$2)) continue;
       final key = 'out|${c['id']}';
-      if (done.contains(key)) continue;
+      // 与签到分支保持一致：强制跑一轮时不受已完成标记限制。
+      if (!force && done.contains(key)) continue;
       final ok = await _submitSignOut(c, name: '${c['courseName'] ?? '课程'}');
       if (ok) await KqAutoStore.markDone(key);
-      await Future<void>.delayed(Duration(milliseconds: 900 + _rnd.nextInt(1800)));
+      await Future<void>.delayed(
+        Duration(milliseconds: 900 + _rnd.nextInt(1800)),
+      );
     }
 
     return signed;
@@ -151,13 +158,21 @@ class KqSigner {
     return '${c['signOutTime'] ?? ''}'.trim().isNotEmpty;
   }
 
-  final Set<String> _windowLogged = <String>{};
+  /// 窗口提示去重。
+  ///
+  /// 必须是 static：每轮 tick 都会 new 一个 KqSigner，实例字段会随对象一起
+  /// 丢掉，去重等于没做——实测表现为每 20 秒写一条「XX 窗外」，
+  /// 几分钟就把 200 行的日志槽刷满，真正的签到结果被冲没了。
+  static final Map<String, DateTime> _windowLoggedAt = <String, DateTime>{};
 
   bool _shouldLogWindow(Map<String, dynamic> c) {
-    // 每门课每小时最多提醒一次，避免刷屏。
-    final k = '${c['id']}|${DateTime.now().hour}';
-    if (_windowLogged.contains(k)) return false;
-    _windowLogged.add(k);
+    final key = '${c['id']}';
+    final now = DateTime.now();
+    final last = _windowLoggedAt[key];
+    if (last != null && now.difference(last) < const Duration(minutes: 10)) {
+      return false;
+    }
+    _windowLoggedAt[key] = now;
     return true;
   }
 
@@ -204,7 +219,11 @@ class KqSigner {
     return formatGps(j[0], j[1]);
   }
 
-  Future<bool> _submitSign(Map<String, dynamic> c, {required String name, required bool force}) async {
+  Future<bool> _submitSign(
+    Map<String, dynamic> c, {
+    required String name,
+    required bool force,
+  }) async {
     final now = DateTime.now();
     String gps;
     try {
@@ -265,7 +284,10 @@ class KqSigner {
     return false;
   }
 
-  Future<bool> _submitSignOut(Map<String, dynamic> c, {required String name}) async {
+  Future<bool> _submitSignOut(
+    Map<String, dynamic> c, {
+    required String name,
+  }) async {
     final now = DateTime.now();
     String gps;
     try {
@@ -333,7 +355,9 @@ class KqSigner {
     } catch (e) {
       await KqAutoStore.appendLog('  设备日志失败：${_brief(e)}');
     }
-    await Future<void>.delayed(Duration(milliseconds: 8000 + _rnd.nextInt(12000)));
+    await Future<void>.delayed(
+      Duration(milliseconds: 8000 + _rnd.nextInt(12000)),
+    );
   }
 
   Future<void> _face({required String gps, required bool passed}) async {
@@ -342,7 +366,9 @@ class KqSigner {
       await _c.faceReport({
         'uuid': _uuid(),
         'user_id': studentNo,
-        'score': double.parse((0.52 + _rnd.nextDouble() * 0.19).toStringAsFixed(4)),
+        'score': double.parse(
+          (0.52 + _rnd.nextDouble() * 0.19).toStringAsFixed(4),
+        ),
         'threshold': 0.45,
         'status': passed ? 'PASS' : 'FAIL',
         'latitude': parts[0],
