@@ -561,8 +561,8 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
           _actionTile(
             theme,
             icon: Icons.receipt_long_outlined,
-            title: '历史考勤记录',
-            subtitle: '按日期查看，含接口权限探测',
+            title: '考勤记录',
+            subtitle: '按日期读取课表与出勤明细',
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute<void>(builder: (_) => const KqRecordScreen()),
