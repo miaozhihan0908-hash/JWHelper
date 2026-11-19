@@ -375,26 +375,31 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
     }
   }
 
-  /// 右下角小入口：打开后台签到控制台。刻意做小，避免遮挡网页内容。
+  /// 右下角小入口：打开自动签到。刻意做小，避免遮挡网页内容。
   Widget _buildAutoEntry() {
     final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.surface.withValues(alpha: 0.86),
-      shape: const CircleBorder(),
-      elevation: 3,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: () {
-          Navigator.of(
-            context,
-          ).push(MaterialPageRoute<void>(builder: (_) => const KqAutoScreen()));
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(9),
-          child: Icon(
-            Icons.alarm_on,
-            size: 19,
-            color: theme.colorScheme.primary,
+    final scheme = theme.colorScheme;
+    return Tooltip(
+      message: '自动签到',
+      child: Material(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.92),
+        shape: const CircleBorder(),
+        elevation: 2,
+        shadowColor: scheme.shadow.withValues(alpha: 0.2),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const KqAutoScreen()),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Icon(
+              Icons.auto_mode_rounded,
+              size: 20,
+              color: scheme.primary,
+            ),
           ),
         ),
       ),
