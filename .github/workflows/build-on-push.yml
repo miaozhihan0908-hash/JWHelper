@@ -12,6 +12,9 @@ on:
       - ".gitattributes"
       - "env.sample"
       - ".github/**"
+      # 远程开关只改配置和签名脚本，跟 APK 内容无关：改一次不该重打一次包。
+      - "kq_gate.json"
+      - "sign_gate.py"
   # PR 只做快速校验（见 build-android / build-ios 的 if），构建留给 main。
   pull_request:
     branches:
@@ -23,6 +26,9 @@ on:
       - ".gitattributes"
       - "env.sample"
       - ".github/**"
+      # 远程开关只改配置和签名脚本，跟 APK 内容无关：改一次不该重打一次包。
+      - "kq_gate.json"
+      - "sign_gate.py"
   workflow_dispatch:
 
 run-name: >-
