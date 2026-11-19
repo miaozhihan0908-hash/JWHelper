@@ -12,7 +12,6 @@ import 'package:JWHelper/features/attendance/presentation/attendance_web_actions
 import 'package:JWHelper/features/attendance/data/kq_auto_service.dart';
 import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
 import 'package:JWHelper/features/attendance/presentation/kq_auto_screen.dart';
-import 'package:flutter/services.dart' show rootBundle;
 
 /// 智慧考勤网页版（底部导航「考勤」tab 主体）。
 ///
@@ -73,7 +72,6 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
             },
             onPageFinished: (String url) async {
               await _injectTokenToWebStorage();
-              await _injectCheckinScript();
               if (mounted) setState(() => _isLoading = false);
             },
           ),
@@ -499,29 +497,15 @@ class _CampusWebViewScreenState extends State<CampusWebViewScreen> {
     }
   }
 
-  /// 把签到辅助脚本注入考勤网页。脚本自带令牌等待（2 秒轮询）与悬浮面板，
-  /// 所以注入时机不必精确：页面还没就绪时它自己会续上。
-  Future<void> _injectCheckinScript() async {
-    try {
-      final js = await rootBundle.loadString('assets/kq/kq.user.js');
-      // 只有后台服务**确实在跑**时才停掉网页脚本的自启。
-      // 之前按配置项判断，结果服务启动失败时两条链路同时哑掉，什么都不签。
-      var bgRunning = false;
-      try {
-        final autoConfig = await KqAutoStore.readConfig();
-        if (autoConfig.enabled) bgRunning = await kqIsAutoServiceRunning();
-      } catch (_) {}
-      final guard = bgRunning
-          ? "try{var c=JSON.parse(localStorage.getItem('kq_mobile_cfg')||'{}');"
-                "c.autoStart=false;localStorage.setItem('kq_mobile_cfg',JSON.stringify(c));"
-                "}catch(e){}"
-          : '';
-      await _controller?.runJavaScript('$guard$js');
-    } catch (_) {
-      // 资源缺失或当前页面不支持脚本时静默跳过，不影响网页本身。
-    }
-  }
-
+  /// 这里原本会往网页里注入 `assets/kq/kq.user.js`（一套网页版自动签到脚本）。
+  ///
+  /// 删掉的原因：
+  /// * 它只有考勤页开着、并且 App 在前台时才有效，退到后台就被浏览器节流，
+  ///   实际等于没有；真正常驻签到的能力在 [KqAutoScreen] 那条前台服务链路上。
+  /// * 它和 App 引擎是两套独立实现、两套开关、两套日志，出问题时要先分辨
+  ///   "到底是谁签的"，排查成本远高于收益。
+  /// * 它自己的配置只要版本号对不上就会把 `autoStart` 强行改回 true，
+  ///   是个埋着的意外开关。
   Future<void> _openInBrowser() async {
     // 浏览器兜底同样希望带上登录态：先把令牌准备好；
     // 准备失败也照常打开，网页内可以自己登录。
