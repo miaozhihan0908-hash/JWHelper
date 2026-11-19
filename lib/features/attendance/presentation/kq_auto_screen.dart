@@ -137,34 +137,48 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
     }
   }
 
-  Future<void> _runNow() async {
-    // force 会同时绕过时间窗和「已签到」判断，直接打 doSign。开着真提交时
-    // 按这一下就是真的签到，所以先问一句：这是全 App 唯一能无视时间窗
-    // 写进考勤记录的动作。
-    if (_config.commit) {
-      final go = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('立刻跑一次'),
-          content: const Text(
-            '这个动作会无视时间窗直接提交：不在上课时间、或者以为已经签过，'
-            '它也会真的发一次请求。\n\n现在「真正提交」是开着的，所以可能真的'
-            '在校外时间签上一次。要继续吗？',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('继续'),
-            ),
-          ],
+  /// 强制签到：无视时间窗直接提交。
+  ///
+  /// 这是全 App 唯一能在任意时刻写进考勤记录的动作（定时器有 ±30 分钟闸门），
+  /// 所以每次都要先问一句。
+  Future<void> _forceSign() async {
+    final committed = _config.commit;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('强制签到'),
+        content: Text(
+          committed
+              ? '它会无视时间窗直接提交：不在上课时间也会真的发一次请求，'
+                    '可能在校外时间签上一次。\n\n点一次就好，别连点。'
+              : '它会无视时间窗直接提交。\n\n现在「真正提交」是关着的，'
+                    '所以只会把要发的内容写进记录，不会真发。',
         ),
-      );
-      if (go != true || !mounted) return;
-    }
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('强制'),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    await _runSigner(mode: KqSignMode.signIn, force: true);
+  }
+
+  /// 跑一轮签到/签退。手动按钮和「强制」共用这里，只是 mode / force 不同。
+  Future<void> _runSigner({
+    required KqSignMode mode,
+    bool force = false,
+  }) async {
+    if (_busy) return;
     setState(() => _busy = true);
     try {
       final cookie = await KqAutoStore.readCookie();
@@ -180,8 +194,14 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
         jitterSigma: _config.jitterSigma,
       );
       try {
-        final n = await signer.runOnce(force: true);
-        await _toast(n > 0 ? '已提交 $n 条' : '这次没有可提交的，详情在运行记录里');
+        final n = await signer.runOnce(mode: mode, force: force);
+        if (!_config.commit) {
+          await _toast('演练模式：已经写进记录，没有真发');
+        } else if (n > 0) {
+          await _toast('已提交 $n 条');
+        } else {
+          await _toast(force ? '强制跑完了，详情在运行记录里' : '现在没有能签的课（不在窗口内或已签过）');
+        }
       } finally {
         signer.close();
       }
@@ -278,7 +298,7 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
         children: [
           _statusCard(theme),
           const SizedBox(height: 14),
-          _quickActions(theme),
+          _manualActions(theme),
           const SizedBox(height: 10),
           _recordEntry(theme),
           const SizedBox(height: 14),
@@ -482,37 +502,89 @@ class _KqAutoScreenState extends State<KqAutoScreen> {
     return '${d.inDays} 天前';
   }
 
-  /// 两个真正高频的动作。原来它们埋在「更多」里，和「电池白名单」这种一次性
-  /// 设置同样大小、同样位置——最常用的反而最难找。
-  Widget _quickActions(ThemeData theme) {
-    return Row(
+  /// 手动操作区：上课点「签到」、下课前点「签退」，不赶趟就点「强制」。
+  ///
+  /// 这三个按钮是删掉注入网页那套脚本后接回来的口子——原来它们长在网页右下角
+  /// 的球面板里，App 一退到后台就没了，不如放这儿。
+  Widget _manualActions(ThemeData theme) {
+    final scheme = theme.colorScheme;
+    final radius = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(12),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: FilledButton.icon(
-            onPressed: _busy ? null : _runNow,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(0, 46),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+        Row(
+          children: [
+            Text(
+              '手动操作',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
               ),
             ),
-            icon: const Icon(Icons.play_arrow_rounded, size: 20),
-            label: const Text('立刻跑一次'),
-          ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _busy ? null : _selfTest,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: const Icon(Icons.network_check_rounded, size: 15),
+              label: const Text('自检'),
+            ),
+          ],
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: FilledButton.tonalIcon(
-            onPressed: _busy ? null : _selfTest,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(0, 46),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _busy
+                    ? null
+                    : () => _runSigner(mode: KqSignMode.signIn),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 46),
+                  shape: radius,
+                  padding: EdgeInsets.zero,
+                ),
+                icon: const Icon(Icons.login_rounded, size: 18),
+                label: const Text('签到'),
               ),
             ),
-            icon: const Icon(Icons.network_check_rounded, size: 18),
-            label: const Text('自检'),
-          ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.tonalIcon(
+                onPressed: _busy
+                    ? null
+                    : () => _runSigner(mode: KqSignMode.signOut),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 46),
+                  shape: radius,
+                  padding: EdgeInsets.zero,
+                ),
+                icon: const Icon(Icons.logout_rounded, size: 18),
+                label: const Text('签退'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _busy ? null : _forceSign,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 46),
+                  shape: radius,
+                  padding: EdgeInsets.zero,
+                  foregroundColor: scheme.error,
+                  side: BorderSide(color: scheme.error.withValues(alpha: 0.5)),
+                ),
+                icon: const Icon(Icons.bolt_rounded, size: 18),
+                label: const Text('强制'),
+              ),
+            ),
+          ],
         ),
       ],
     );

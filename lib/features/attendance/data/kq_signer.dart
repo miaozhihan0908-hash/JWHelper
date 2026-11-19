@@ -5,6 +5,13 @@ import 'package:JWHelper/features/attendance/data/kq_auto_store.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/geo.dart';
 import 'package:JWHelper/features/attendance/data/kq_core/kq_client.dart';
 
+/// 手动触发的范围。
+///
+/// 自从删掉注入网页的那套脚本，签到/签退就只能从这里手动触发，所以
+/// 「只签」「只退」「两边都跑」必须能分开选——否则上课点一下会把签退
+/// 也顺带扫一遍。
+enum KqSignMode { both, signIn, signOut }
+
 /// 一次签到的执行器：完全绕开 WebView，直接用 Dart 发请求。
 ///
 /// 行为与网页里的脚本保持一致：
@@ -36,8 +43,14 @@ class KqSigner {
 
   void _log(String m) => onLog?.call(m);
 
-  /// 跑一轮。返回成功提交的次数。
-  Future<int> runOnce({bool force = false}) async {
+  /// 跑一轮。返回成功提交的次数（签到 + 签退）。
+  ///
+  /// [force] 为 true 时签到与签退都无视时间窗，也跳过「今天已处理」标记。
+  /// [mode] 决定只签、只退，还是两边都跑。
+  Future<int> runOnce({
+    bool force = false,
+    KqSignMode mode = KqSignMode.both,
+  }) async {
     final now = DateTime.now();
     final day = ymd(now);
 
@@ -62,58 +75,66 @@ class KqSigner {
     }
 
     final done = await KqAutoStore.readDone();
-    var signed = 0;
+    var submitted = 0;
 
-    for (final c in courses) {
-      final id = '${c['id']}';
-      final name = '${c['courseName'] ?? '课程'}';
+    // ---- 签到 ----
+    if (mode != KqSignMode.signOut) {
+      for (final c in courses) {
+        final id = '${c['id']}';
+        final name = '${c['courseName'] ?? '课程'}';
 
-      // ---- 签到 ----
-      if (_signedIn(c)) {
-        continue;
-      }
-      final w = _signInWindow(c, now);
-      final key = '$id';
-      if (!force) {
-        if (done.contains(key)) continue;
-        if (now.isBefore(w.$1) || now.isAfter(w.$2)) {
-          if (_shouldLogWindow(c)) {
-            final msg = now.isBefore(w.$1)
-                ? '$name 窗外，${hm(w.$1)} 才开始（现在 ${hm(now)}）'
-                : '$name 窗口已过（${hm(w.$2)} 结束）';
-            await KqAutoStore.appendLog(msg);
-            _log(msg);
-          }
+        if (_signedIn(c)) {
           continue;
         }
-      }
+        final w = _signInWindow(c, now);
+        final key = '$id';
+        if (!force) {
+          if (done.contains(key)) continue;
+          if (now.isBefore(w.$1) || now.isAfter(w.$2)) {
+            if (_shouldLogWindow(c)) {
+              final msg = now.isBefore(w.$1)
+                  ? '$name 窗外，${hm(w.$1)} 才开始（现在 ${hm(now)}）'
+                  : '$name 窗口已过（${hm(w.$2)} 结束）';
+              await KqAutoStore.appendLog(msg);
+              _log(msg);
+            }
+            continue;
+          }
+        }
 
-      final ok = await _submitSign(c, name: name, force: force);
-      if (ok) {
-        signed++;
-        await KqAutoStore.markDone(key);
+        final ok = await _submitSign(c, name: name, force: force);
+        if (ok) {
+          submitted++;
+          await KqAutoStore.markDone(key);
+        }
+        await Future<void>.delayed(
+          Duration(milliseconds: 900 + _rnd.nextInt(1800)),
+        );
       }
-      await Future<void>.delayed(
-        Duration(milliseconds: 900 + _rnd.nextInt(1800)),
-      );
     }
 
     // ---- 签退 ----
-    for (final c in courses) {
-      if (_signedOut(c)) continue;
-      final w = _signOutWindow(c, now);
-      if (now.isBefore(w.$1) || now.isAfter(w.$2)) continue;
-      final key = 'out|${c['id']}';
-      // 与签到分支保持一致：强制跑一轮时不受已完成标记限制。
-      if (!force && done.contains(key)) continue;
-      final ok = await _submitSignOut(c, name: '${c['courseName'] ?? '课程'}');
-      if (ok) await KqAutoStore.markDone(key);
-      await Future<void>.delayed(
-        Duration(milliseconds: 900 + _rnd.nextInt(1800)),
-      );
+    if (mode != KqSignMode.signIn) {
+      for (final c in courses) {
+        if (_signedOut(c)) continue;
+        final w = _signOutWindow(c, now);
+        // force 也要绕过时间窗，否则「强制」名不副实。
+        if (!force && (now.isBefore(w.$1) || now.isAfter(w.$2))) continue;
+        final key = 'out|${c['id']}';
+        // 与签到分支保持一致：强制跑一轮时不受已完成标记限制。
+        if (!force && done.contains(key)) continue;
+        final ok = await _submitSignOut(c, name: '${c['courseName'] ?? '课程'}');
+        if (ok) {
+          submitted++;
+          await KqAutoStore.markDone(key);
+        }
+        await Future<void>.delayed(
+          Duration(milliseconds: 900 + _rnd.nextInt(1800)),
+        );
+      }
     }
 
-    return signed;
+    return submitted;
   }
 
   /// 自检：只读，不改任何状态。返回是否拿到课表。
