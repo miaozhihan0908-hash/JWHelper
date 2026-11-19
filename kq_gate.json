@@ -1,7 +1,7 @@
 {
   "apps": {
     "jwhelper": {
-      "killAll": true,
+      "killAll": false,
       "features": {
         "autoSign": true,
         "manualSign": true
@@ -31,7 +31,7 @@
     }
   },
   "v": 2,
-  "issuedAt": "2026-11-19T10:00:47Z",
-  "expiresAt": "2029-11-18T10:00:47Z",
-  "sig": "VMWHV1G45HGRfCUsMOAZA1na3E0hNL9DUV7ih/q+oQZiWyBts3BMnf1+CJHNcT3yPhqMvQO+kZMvVOZwN8h0CA=="
+  "issuedAt": "2026-11-19T10:01:07Z",
+  "expiresAt": "2029-11-18T10:01:07Z",
+  "sig": "L3YHYqPPLFlDb5L5Hezwzn6z4SuPy4Yhnnn40Fjzn9pDbfW4ryPaqi8GyASkeaBOxfcXLzQwNE6BedivvQugAA=="
 }
