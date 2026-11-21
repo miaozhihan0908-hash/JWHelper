@@ -26,12 +26,19 @@
           "sub": "202608140075",
           "iat": "2026-11-19T09:13:04Z",
           "note": "本人·永久"
+        },
+        {
+          "kid": "338AEA6E05187D6B",
+          "days": 0,
+          "sub": "2026014009",
+          "iat": "2026-11-21T14:16:53Z",
+          "note": "无"
         }
       ]
     }
   },
   "v": 2,
-  "issuedAt": "2026-11-19T10:15:08Z",
-  "expiresAt": "2029-11-18T10:15:08Z",
-  "sig": "8fy8S/hxYjb76YBljI8CY4TN2K0bOQUqmT7Wl4pGZedHA6ujQ4XBcAAY1TJu/Yafaz+9oj/GTJUVFe0/aRlXCA=="
+  "issuedAt": "2026-11-21T14:16:53Z",
+  "expiresAt": "2029-11-20T14:16:53Z",
+  "sig": "rERNlgOd0dsncAmJ8jq87geUw4CgFHmPMhuO4wJgELSW5192jbbsBZ5FQ8+SN0ldSmMCPF3qYBiiwF0SE1d6BA=="
 }
